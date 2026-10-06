@@ -2,6 +2,28 @@
 
 Laravel, Vue 3, TypeScript, and PostgreSQL company portal with in-house product access and Communication.
 
+## First setup after cloning
+
+Install PHP 8.2+ with `pdo_pgsql`, Composer, Node.js, and PostgreSQL. The portable database binaries and development database are local-only and are not included in Git.
+
+```powershell
+composer install
+npm ci
+Copy-Item .env.example .env
+php artisan key:generate
+```
+
+Create a PostgreSQL database and role, then set the database connection values in `.env`. Configure SMTP there if invitations should reach inboxes.
+
+```powershell
+php artisan migrate
+php artisan judibas:admin-password
+npm run build
+php artisan serve
+```
+
+Set the Super Admin password with the interactive command above. Start `npm run dev` in another terminal when developing the frontend.
+
 ## Run locally
 
 From the project folder:
@@ -59,3 +81,7 @@ Company content defaults live in config/pages.php and can be overridden through 
 - php scripts/cleanup-communication-check.php
 
 Browser checks use Microsoft Edge and the local server. Screenshots go into .preview. Feature tests use PostgreSQL transactions and roll back their records. Do not run RefreshDatabase against the development database.
+
+## Communication Status
+
+The Status tab has a WhatsApp-style directory with author photos, My updates, Recent updates, and Today/Yesterday timestamps. Super Admin and delegated Communication Admins can publish updates. Delegated updates remain company-scoped. The viewer shows full media, remaining expiry time, a lifetime indicator, previous/next navigation, and authorized viewer details. All updates expire after 24 hours.

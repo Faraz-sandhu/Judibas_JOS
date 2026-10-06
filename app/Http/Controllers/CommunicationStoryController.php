@@ -12,7 +12,12 @@ class CommunicationStoryController extends Controller
 {
     public static function listing(Request $r)
     {
-        return self::visible($r)->orderByDesc('id')->get()->map(function ($s) {
+        $stories = self::visible($r)->orderByDesc('id')->get();
+        $authors = User::whereIn('id', $stories->pluck('author_id')->filter()->unique())->get(['id', 'name', 'profile_photo_path'])->keyBy('id');
+        return $stories->map(function ($s) use ($authors) {
+            $author = $authors->get($s->author_id);
+            $s->author_name = $author?->name ?? 'Company Admin';
+            $s->author_avatar = $author?->avatar_url;
             $s->attachment_url = $s->attachment_path ? '/communication/api/stories/'.$s->id.'/attachment' : null;
             unset($s->attachment_path);
 
