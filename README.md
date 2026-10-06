@@ -50,7 +50,7 @@ Super Admin sections:
 - Website: homepage announcement and company-page content.
 - Products: display details, icons, ordering, and visibility for developer-registered products.
 - Users: company assignment, account activation, passwords, product permissions, and Communication Admin roles.
-- Communication: company communities, email invitations, group membership, and onboarding.
+- Communication management is inside Products → Communication, separate from website administration.
 - Branding: project name, introduction, and logo upload.
 
 This portal is for in-house use. Billing, Plans, pricing, and trials are removed.
@@ -85,3 +85,9 @@ Browser checks use Microsoft Edge and the local server. Screenshots go into .pre
 ## Communication Status
 
 The Status tab has a WhatsApp-style directory with author photos, My updates, Recent updates, and Today/Yesterday timestamps. Super Admin and delegated Communication Admins can publish updates. Delegated updates remain company-scoped. The viewer shows full media, remaining expiry time, a lifetime indicator, previous/next navigation, and authorized viewer details. All updates expire after 24 hours.
+
+## Product-specific Communication management
+
+Super Admin opens /products/communication for the product overview: chats, Communication users, companies and communities, invitations, status and announcements, conversation review, and review logs. No Communication item is added to the portal sidebar. Signed-in employees with Communication access are redirected from the product page straight to /communication. Delegated admins keep their company-scoped onboarding tools in chat.
+
+Website Administration manages shared employee accounts and other product permissions. Communication access and admin roles are managed within the product. Removing access there preserves the global employee account and other product permissions. A company is required when granting Communication access; global accounts without Communication can remain unassigned.

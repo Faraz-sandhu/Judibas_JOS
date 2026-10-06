@@ -2,6 +2,7 @@
 import { computed, ref, reactive } from 'vue';
 import AdminPanel from './AdminPanel.vue';
 import Communication from './Communication.vue';
+import CommunicationOverview from './CommunicationOverview.vue';
 import InvitationAcceptance from './InvitationAcceptance.vue';
 type Product={slug:string;name:string;category:string;icon:string;color:string;description:string;features:string[]};
 type Info={title:string;intro:string;body:string};
@@ -22,7 +23,7 @@ const navigation=[
 {title:'Our values',href:'/values',path:'m12 3 3 6 6 1-4 5 1 6-6-3-6 3 1-6-4-5 6-1z'},
 {title:'Company updates',href:'/blog',path:'M5 3h14v18H5z M8 7h8 M8 11h8 M8 15h5'},
 {title:'Contact',href:'/contact',path:'M3 5h18v14H3z m0 0 9 7 9-7'},
-{title:'Communication',href:'/communication',path:'M3 4h18v13H9l-6 4z M7 8h10 M7 12h7'},
+
 {title:'Learning',href:'/products/learning',path:'M4 3h16v18H4z M7 7h10 M7 11h10 M7 15h5'},
 {title:'Helpdesk',href:'/products/helpdesk',path:'M3 14v-3a9 9 0 0 1 18 0v3 M3 11h4v7H3z M17 11h4v7h-4z M17 18v3h-5'},
 {title:'Our team',href:'/team',path:'M9 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M2 21v-2a7 7 0 0 1 14 0v2 M18 5a3 3 0 0 1 0 6 M22 21v-2a6 6 0 0 0-4-5'},
@@ -72,10 +73,7 @@ const title=computed(()=>portal.settingsPage?'Administration':portal.product?.na
 
 </template>
 <template v-else-if="portal.loginPage"><section class="admin-content"><p class="eyebrow">COMPANY WORKSPACE</p><h1>Welcome back.</h1><p class="muted">Sign in with your company email and password.</p><p v-if="portal.error" class="notice" role="alert">{{ portal.error }}</p><ul v-if="portal.validationErrors.length" class="notice" role="alert"><li v-for="error in portal.validationErrors" :key="error">{{ error }}</li></ul><form action="/login" method="post" class="settings-form"><input type="hidden" name="_token" :value="csrf"><label>Email<input name="email" type="email" required autocomplete="username"></label><label>Password<input name="password" type="password" required autocomplete="current-password"></label><button class="button primary">Sign in &rarr;</button></form></section></template>
-<template v-else-if="portal.product?.slug==='communication'">
-<section class="product-hero"><p class="eyebrow">COMMUNICATION</p><h1>A space for every conversation.</h1><p class="lead">Personal chats, groups, company communities, and announcements. Together in your company workspace.</p><div class="hero-actions"><a class="button primary" href="/communication">Open Communication &rarr;</a></div><p class="availability-note">Sign in with your company account. Access is assigned by your administrator.</p></section>
-<section class="product-section"><p class="eyebrow">YOUR COMPANY, CONNECTED</p><h2>Stay close to your team.</h2><div class="features"><article><h3>Conversations</h3><p>Message colleagues, create groups, reply to messages, and share files.</p></article><article><h3>Company communities</h3><p>Join your assigned company community, receive Super Admin announcements, and chat in your groups.</p></article><article><h3>Company stories</h3><p>Read updates published by your administrators. Stories expire after 24 hours.</p></article><article><h3>Company oversight</h3><p>Super Admin can review employee conversations and files. Reviews are logged and clearly labelled.</p></article></div></section>
-</template>
+<template v-else-if="portal.product?.slug==='communication'"><CommunicationOverview v-if="portal.admin" :name="portal.name" :csrf="csrf"/><section v-else class="product-hero"><p class="eyebrow">COMMUNICATION</p><h1>A space for every conversation.</h1><a class="button primary" href="/communication">Go to chats →</a></section></template>
 <template v-else-if="portal.product">
 <div class="product-nav"><a href="/products">{{ portal.name }} <span>/</span> {{ portal.product.name }}</a><a href="#availability">Product availability &rarr;</a></div>
 <section class="product-hero"><p class="eyebrow">{{ portal.product.name }}</p><h1>{{ portal.product.description }}</h1><p class="lead">Simple tools. A familiar workspace. Built around your company.</p><div class="hero-actions"><a v-if="portal.product.slug==='communication'" class="button primary" href="/communication">Open Communication &rarr;</a><a class="button primary" href="#availability">Coming soon <span>&rarr;</span></a><a class="button" href="#features">Explore features</a></div><p class="availability-note">In development for your {{ portal.name }} workspace</p></section>

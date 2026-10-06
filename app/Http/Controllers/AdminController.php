@@ -46,7 +46,7 @@ class AdminController extends Controller
             if (is_string($email)) {
                 $r->merge(['email' => strtolower($email)]);
             }
-            $v = $r->validate(['company_id' => 'required|integer|exists:communication_companies,id', 'communication_admin' => 'sometimes|boolean', 'name' => 'required|string|max:100', 'email' => ['required', 'email', 'max:200', Rule::unique('users', 'email')->ignore($id)], 'password' => [$id ? 'nullable' : 'required', 'string', 'min:12', 'max:200'], 'is_active' => 'required|boolean', 'product_slugs' => 'present|array', 'product_slugs.*' => ['string', Rule::in($slugs)]]);
+            $v = $r->validate(['company_id' => [Rule::requiredIf(fn () => in_array('communication', $r->input('product_slugs', []))), 'nullable', 'integer', 'exists:communication_companies,id'], 'communication_admin' => 'sometimes|boolean', 'name' => 'required|string|max:100', 'email' => ['required', 'email', 'max:200', Rule::unique('users', 'email')->ignore($id)], 'password' => [$id ? 'nullable' : 'required', 'string', 'min:12', 'max:200'], 'is_active' => 'required|boolean', 'product_slugs' => 'present|array', 'product_slugs.*' => ['string', Rule::in($slugs)]]);
             abort_if(strtolower($v['email']) === strtolower((string) config('judibas.admin_email')), 422, 'This email is reserved for Super Admin.');
             abort_if(! empty($v['communication_admin']) && ! in_array('communication', $v['product_slugs']), 422, 'A Communication Admin needs Communication product access.');
             DB::transaction(function () use ($v, $id) {
@@ -54,7 +54,7 @@ class AdminController extends Controller
                 $u->name = $v['name'];
                 $u->email = strtolower($v['email']);
                 $u->is_active = $v['is_active'];
-                $u->company_id = $v['company_id'];
+                $u->company_id = $v['company_id'] ?? $u->company_id;
                 $u->communication_admin = in_array('communication', $v['product_slugs']) && (bool) ($v['communication_admin'] ?? $u->communication_admin ?? false);
                 if (! empty($v['password'])) {
                     $u->password = $v['password'];

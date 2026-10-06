@@ -63,3 +63,7 @@ Route::get('/communication/api/stories/{id}/attachment', [CommunicationStoryCont
 
 Route::post('/communication/api/stories/{id}/view', [CommunicationStoryController::class, 'viewed'])->whereNumber('id');
 Route::get('/communication/api/stories/{id}/viewers', [CommunicationStoryController::class, 'viewers'])->whereNumber('id');
+
+Route::get('/communication/api/users', [\App\Http\Controllers\CommunicationUsersController::class, 'data']);
+Route::post('/communication/api/users/{id?}', [\App\Http\Controllers\CommunicationUsersController::class, 'save'])->whereNumber('id');
+Route::delete('/communication/api/users/{id}', [\App\Http\Controllers\CommunicationUsersController::class, 'remove'])->whereNumber('id');
