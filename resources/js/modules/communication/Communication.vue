@@ -14,6 +14,7 @@ function shortTime(value:string){return new Date(value.replace(' ','T')+'Z').toL
 function dayLabel(value:string){return new Date(value.replace(' ','T')+'Z').toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'});}
 const composerInput=ref<HTMLTextAreaElement|null>(null);
 let polling=false;
+let backgroundRequest:AbortController|undefined;
 async function insertEmoji(emoji:string){const input=composerInput.value;const start=input?.selectionStart??draft.value.length,end=input?.selectionEnd??start;if(draft.value.length-(end-start)+emoji.length>10000)return;draft.value=draft.value.slice(0,start)+emoji+draft.value.slice(end);await nextTick();input?.focus();input?.setSelectionRange(start+emoji.length,start+emoji.length);}
 const props=defineProps<{csrf?:string}>();
 const emit=defineEmits<{profileUpdated:[name:string,csrf:string]}>();
@@ -38,41 +39,41 @@ const conversations=computed(()=>data.value?.conversations.filter(c=>(section.va
 const candidates=computed(()=>data.value?.people.filter(p=>(data.value?.admin||p.id!==data.value?.user_id)&&(modalKind.value!=='group'||!modalTeam.value||p.company_id===Number(modalTeam.value)))||[]);
 const alerts=computed(()=>data.value?.conversations.filter(c=>c.kind==='community'&&c.unread>0)||[]);
 function url(path:string,extra:Record<string,string>={}){const query=new URLSearchParams(extra);if(viewUser.value)query.set('view_user',viewUser.value);return '/communication/api'+path+(query.size?'?'+query:'');}
-async function api(path:string,method='GET',body?:any,extra:Record<string,string>={}){
+async function api(path:string,method='GET',body?:any,extra:Record<string,string>={},signal?:AbortSignal){
  const form=body instanceof FormData;
- const response=await fetch(url(path,extra),{method,headers:{Accept:'application/json','X-CSRF-TOKEN':props.csrf||'',...(!form?{'Content-Type':'application/json'}:{})},body:body?(form?body:JSON.stringify(body)):undefined});
+ const response=await fetch(url(path,extra),{method,signal,headers:{Accept:'application/json','X-CSRF-TOKEN':props.csrf||'',...(!form?{'Content-Type':'application/json'}:{})},body:body?(form?body:JSON.stringify(body)):undefined});
  if(!response.ok){const issue=await response.json().catch(()=>({}));throw new Error(Object.values(issue.errors||{}).flat().join(' ')||issue.message||'Unable to complete this action.');}
  return response.json();
 }
 let storiesPolling=false,lastStorySync=0;
 async function syncStories(){
- if(storiesPolling||!data.value||document.hidden||reviewing.value)return;
+ if(storiesPolling||!data.value||document.hidden||reviewing.value||sending.value||refreshing.value||polling)return;
  storiesPolling=true;lastStorySync=Date.now();const review=viewUser.value;
  try{const result=await api('/stories');if(review!==viewUser.value||!data.value)return;data.value.stories=result.stories;if(story.value&&!result.stories.some((s:Story)=>s.id===story.value?.id))story.value=null;}
  catch{/* Retry on the next tick after a temporary connection failure. */}
  finally{storiesPolling=false;}
 }
 function resumeStories(){if(!document.hidden)void syncStories();}
-async function refresh(){
+async function refresh(withMessages=true){
  if(refreshing.value||reviewing.value)return;
  refreshing.value=true;const version=generation;
  try{const result=await api('');if(version===generation){data.value=result;if(story.value&&!result.stories.some((s:Story)=>s.id===story.value?.id))story.value=null;}if(version===generation&&active.value&&!result.conversations.some((c:Conversation)=>c.id===active.value)){active.value=null;messages.value=[];}
- if(active.value&&version===generation)await loadMessages(false);
+ if(withMessages&&active.value&&version===generation)await loadMessages(false);
  }catch(e){error.value=(e as Error).message;}finally{refreshing.value=false;}
 }
-async function loadMessages(audit=false,older=false){
+async function loadMessages(audit=false,older=false,signal?:AbortSignal){
  if(!active.value)return;
  const id=active.value,version=generation;const extra:Record<string,string>={};if(audit)extra.audit='1';if(older&&messages.value.length)extra.before=String(messages.value[0].id);
- const result=await api('/conversations/'+id+'/messages','GET',undefined,extra);
+ const result=await api('/conversations/'+id+'/messages','GET',undefined,extra,signal);
  if(id!==active.value||version!==generation)return;
- pinned.value=result.pinned||[];
+ if(JSON.stringify(pinned.value)!==JSON.stringify(result.pinned||[]))pinned.value=result.pinned||[];
  const nearBottom=!list.value||list.value.scrollHeight-list.value.scrollTop-list.value.clientHeight<100;
- const merged=new Map(messages.value.map(m=>[m.id,m]));for(const m of result.messages)merged.set(m.id,m);messages.value=[...merged.values()].sort((a,b)=>a.id-b.id);
+ const merged=new Map(messages.value.map(m=>[m.id,m]));for(const m of result.messages)merged.set(m.id,m);const next=[...merged.values()].sort((a,b)=>a.id-b.id);const changed=JSON.stringify(messages.value)!==JSON.stringify(next);if(changed)messages.value=next;
  if(older||messages.value.length<=50)more.value=result.has_more;
  if(!data.value?.admin&&current.value)current.value.unread=0;
- if(audit||(!older&&nearBottom&&!highlight.value)){await nextTick();list.value?.scrollTo({top:list.value.scrollHeight});}
+ if(audit||(changed&&!older&&nearBottom&&!highlight.value)){await nextTick();list.value?.scrollTo({top:list.value.scrollHeight});}
 }
-async function open(c:Conversation){if(c.kind==='community')section.value='Communities';else section.value='Chats';generation++;detailMode.value='';highlight.value=null;active.value=c.id;pinned.value=[];messages.value=[];reply.value=null;search.value='';draft.value='';file.value=null;error.value='';try{await loadMessages(true);}catch(e){error.value=(e as Error).message;}}
+async function open(c:Conversation){backgroundRequest?.abort();if(c.kind==='community')section.value='Communities';else section.value='Chats';generation++;detailMode.value='';highlight.value=null;active.value=c.id;pinned.value=[];messages.value=[];reply.value=null;search.value='';draft.value='';file.value=null;error.value='';try{await loadMessages(true);}catch(e){error.value=(e as Error).message;}}
 async function changeReview(){
  reviewing.value=true;generation++;active.value=null;messages.value=[];error.value='';
  try{data.value=await api(viewUser.value?'/review':'',viewUser.value?'POST':'GET',viewUser.value?{view_user:Number(viewUser.value)}:undefined);}catch(e){error.value=(e as Error).message;}finally{reviewing.value=false;}
@@ -80,7 +81,7 @@ async function changeReview(){
 async function send(){
  if(!active.value||sending.value||monitoring.value||(!draft.value.trim()&&!file.value))return;
  const id=active.value,version=generation,body=draft.value,attachment=file.value,replyTo=reply.value;
- highlight.value=null;sending.value=true;error.value='';
+ backgroundRequest?.abort();highlight.value=null;sending.value=true;error.value='';
  try{
  const form=new FormData();form.append('body',body);if(replyTo)form.append('reply_to',String(replyTo.id));if(attachment)form.append('attachment',attachment);
  const result=await api('/conversations/'+id+'/messages','POST',form);
@@ -157,8 +158,8 @@ function timestamp(value:string){return new Date(value.replace(' ','T')+'Z').toL
 function attached(event:Event){file.value=(event.target as HTMLInputElement).files?.[0]||null;}
 function storyAttachment(s:Story,download=false){const query=new URLSearchParams();if(viewUser.value)query.set('view_user',viewUser.value);if(download)query.set('download','1');return s.attachment_url+(query.size?'?'+query.toString():'');}
 function download(m:Message){return m.attachment_url+(viewUser.value?'?view_user='+viewUser.value:'');}
-onMounted(async()=>{document.addEventListener('pointerup',releaseStatus);document.addEventListener('pointercancel',releaseStatus);document.addEventListener('visibilitychange',resumeStories);window.addEventListener('focus',resumeStories);await refresh();const entry=new URLSearchParams(location.search);if(entry.get('section')==='Status')section.value='Status';if(data.value?.admin){if(entry.get('action')==='review')workspaceInfo.value=true;else if(entry.get('action')==='audit')await showAudits();else if(entry.get('action')==='announcement')newModal('announcement');}timer=setInterval(()=>{storyClock.value=Date.now();if(storyClock.value-lastStorySync>=2000)void syncStories();if(story.value&&parseChatDate(story.value.expires_at).getTime()<=storyClock.value)story.value=null;if(document.hidden||reviewing.value||refreshing.value||sending.value||polling)return;ticks++;polling=true;const task=ticks%15===0||(!active.value&&ticks%3===0)?refresh():active.value?loadMessages():Promise.resolve();void task.catch(e=>{error.value=(e as Error).message;}).finally(()=>{polling=false;});},1000);});
-onBeforeUnmount(()=>{if(playbackTimer)clearInterval(playbackTimer);document.removeEventListener('pointerup',releaseStatus);document.removeEventListener('pointercancel',releaseStatus);document.removeEventListener('visibilitychange',resumeStories);window.removeEventListener('focus',resumeStories);if(timer)clearInterval(timer);generation++;});
+onMounted(async()=>{document.addEventListener('pointerup',releaseStatus);document.addEventListener('pointercancel',releaseStatus);document.addEventListener('visibilitychange',resumeStories);window.addEventListener('focus',resumeStories);await refresh();const entry=new URLSearchParams(location.search);if(entry.get('section')==='Status')section.value='Status';if(data.value?.admin){if(entry.get('action')==='review')workspaceInfo.value=true;else if(entry.get('action')==='audit')await showAudits();else if(entry.get('action')==='announcement')newModal('announcement');}timer=setInterval(()=>{storyClock.value=Date.now();if(storyClock.value-lastStorySync>=2000)void syncStories();if(story.value&&parseChatDate(story.value.expires_at).getTime()<=storyClock.value)story.value=null;if(document.hidden||reviewing.value||refreshing.value||sending.value||polling)return;ticks++;polling=true;const task=ticks%5===0||(!active.value&&ticks%3===0)?refresh(false):active.value?(backgroundRequest=new AbortController(),loadMessages(false,false,backgroundRequest.signal)):Promise.resolve();void task.catch(e=>{if((e as Error).name!=='AbortError')error.value=(e as Error).message;}).finally(()=>{polling=false;});},1000);});
+onBeforeUnmount(()=>{backgroundRequest?.abort();if(playbackTimer)clearInterval(playbackTimer);document.removeEventListener('pointerup',releaseStatus);document.removeEventListener('pointercancel',releaseStatus);document.removeEventListener('visibilitychange',resumeStories);window.removeEventListener('focus',resumeStories);if(timer)clearInterval(timer);generation++;});
 </script>
 
 <template>

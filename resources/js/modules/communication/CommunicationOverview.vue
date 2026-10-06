@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import AdminPanel from './AdminPanel.vue';
+import AdminPanel from '../../AdminPanel.vue';
 import CommunicationManagement from './CommunicationManagement.vue';
 defineProps<{name:string;csrf?:string}>();
 const view=new URLSearchParams(location.search).get('manage')||'';

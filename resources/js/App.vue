@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, reactive, onMounted, onBeforeUnmount } from 'vue';
 import AdminPanel from './AdminPanel.vue';
-import Communication from './Communication.vue';
-import CommunicationOverview from './CommunicationOverview.vue';
-import InvitationAcceptance from './InvitationAcceptance.vue';
+import Communication from './modules/communication/Communication.vue';
+import CommunicationOverview from './modules/communication/CommunicationOverview.vue';
+import InvitationAcceptance from './modules/communication/InvitationAcceptance.vue';
 type Product={slug:string;name:string;category:string;icon:string;color:string;description:string;features:string[]};
 type Info={title:string;intro:string;body:string};
 declare global {interface Window {portal:{name:string;tagline:string;logo:string|null;logoIcon?:string|null;products:Product[];product:Product|null;page?:Info|null;admin:boolean;settingsPage:boolean;productsPage:boolean;loginPage:boolean;employee:{name:string;email:string}|null;invitation?:{token:string;email:string;company:string;existing:boolean};posts:{title:string;slug:string;excerpt:string}[];announcement:{title:string;text:string;url:string};error:string|null;success:string|null;validationErrors:string[]}}}

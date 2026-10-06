@@ -1,5 +1,5 @@
 import fs from 'node:fs';import ts from 'typescript';import assert from 'node:assert/strict';import {chromium,expect} from '@playwright/test';
-const compiled=ts.transpileModule(fs.readFileSync('resources/js/chatTime.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2020}}).outputText;
+const compiled=ts.transpileModule(fs.readFileSync('resources/js/modules/communication/chatTime.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2020}}).outputText;
 const {conversationTime,parseChatDate}=await import('data:text/javascript;base64,'+Buffer.from(compiled).toString('base64'));
 const now=new Date(2026,9,5,14,0);
 const formatDay=days=>{const d=new Date(now);d.setDate(d.getDate()-days);return d.toISOString();};
