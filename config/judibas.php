@@ -1,0 +1,23 @@
+<?php
+
+return [
+    'admin_email' => env('JUDIBAS_ADMIN_EMAIL', 'admin@gmail.com'),
+    'admin_password_hash' => env('JUDIBAS_ADMIN_PASSWORD_HASH'),
+    'products' => [
+        ['slug' => 'communication', 'name' => 'Communication', 'category' => 'Collaboration', 'icon' => 'C', 'color' => '#16a085', 'description' => 'Connect your company with chats, communities, and announcements', 'features' => ['Direct and group messages', 'Company communities', 'File sharing', 'Admin stories']],
+        ['slug' => 'crm', 'name' => 'CRM', 'category' => 'Sales', 'icon' => '', 'color' => '#f5f5f5', 'description' => 'Track leads, contacts, deals, and customer interactions', 'features' => ['Contacts and companies', 'Lead and deal pipeline', 'Activities and follow-ups', 'Sales reporting']],
+        ['slug' => 'hr', 'name' => 'HR', 'category' => 'Human resources', 'icon' => '', 'color' => '#f5f5f5', 'description' => 'Handle employees, attendance, payroll, and HR processes', 'features' => ['Employee directory', 'Leave and attendance', 'Onboarding', 'People reports']],
+        ['slug' => 'projects', 'name' => 'Projects', 'category' => 'Collaboration', 'icon' => '', 'color' => '#f5f5f5', 'description' => 'Manage projects, tasks, and team timelines', 'features' => ['Projects and tasks', 'Team assignments', 'Timeline views', 'Progress reports']],
+        ['slug' => 'inventory', 'name' => 'Inventory', 'category' => 'Operations', 'icon' => '', 'color' => '#f5f5f5', 'description' => 'Manage stock, warehouses, and item movements', 'features' => ['Item catalogue', 'Warehouses', 'Stock movements', 'Inventory reports']],
+        ['slug' => 'helpdesk', 'name' => 'Helpdesk', 'category' => 'Support', 'icon' => '', 'color' => '#f5f5f5', 'description' => 'Deliver customer support through tickets and workflows', 'features' => ['Support tickets', 'Assignments', 'Status tracking', 'Support reporting']],
+        ['slug' => 'accounts', 'name' => 'Accounts', 'category' => 'Finance', 'icon' => '', 'color' => '#f5f5f5', 'description' => 'Manage invoices, payments, and financial records', 'features' => ['Invoices', 'Payments', 'Expenses', 'Financial reporting']],
+        ['slug' => 'erp', 'name' => 'ERP', 'category' => 'Operations', 'icon' => '', 'color' => '#f5f5f5', 'description' => 'Manage accounting, inventory, and operations', 'features' => ['Accounting', 'Sales and purchases', 'Stock management', 'Operations reports']],
+        ['slug' => 'learning', 'name' => 'Learning', 'category' => 'Education', 'icon' => '', 'color' => '#f5f5f5', 'description' => 'Create, manage, and deliver structured online courses', 'features' => ['Courses', 'Lessons', 'Assessments', 'Learning progress']],
+        ['slug' => 'insights', 'name' => 'Insights', 'category' => 'Analytics', 'icon' => '', 'color' => '#f5f5f5', 'description' => 'Analyse data and create dashboards and reports', 'features' => ['Data sources', 'Reports', 'Dashboards', 'Saved queries']],
+        ['slug' => 'lending', 'name' => 'Lending', 'category' => 'Finance', 'icon' => '', 'color' => '#f5f5f5', 'description' => 'Manage loans, repayments, and borrower accounts', 'features' => ['Borrowers', 'Loan applications', 'Repayments', 'Loan reports']],
+        ['slug' => 'framework', 'name' => 'Framework', 'category' => 'Developer tools', 'icon' => '', 'color' => '#f5f5f5', 'description' => 'Build and customise business applications', 'features' => ['Application modules', 'Shared permissions', 'APIs', 'Developer tools']],
+        ['slug' => 'builder', 'name' => 'Builder', 'category' => 'Developer tools', 'icon' => '', 'color' => '#f5f5f5', 'description' => 'Create websites and pages with a visual editor', 'features' => ['Page layouts', 'Reusable sections', 'Content editing', 'Publishing']],
+        ['slug' => 'drive', 'name' => 'Drive', 'category' => 'Productivity', 'icon' => '', 'color' => '#f5f5f5', 'description' => 'Store, share, and organise your company documents', 'features' => ['Files and folders', 'Sharing', 'Document previews', 'Access permissions']],
+        ['slug' => 'gameplan', 'name' => 'Gameplan', 'category' => 'Productivity', 'icon' => '', 'color' => '#f5f5f5', 'description' => 'Plan work, share updates, and track team progress', 'features' => ['Team discussions', 'Project updates', 'Planning', 'Notifications']],
+        ['slug' => 'press', 'name' => 'Press', 'category' => 'Infrastructure', 'icon' => '', 'color' => '#f5f5f5', 'description' => 'Manage application deployments and infrastructure', 'features' => ['Deployments', 'Environment settings', 'Application monitoring', 'Backups']],
+    ]];

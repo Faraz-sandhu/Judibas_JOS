@@ -1,0 +1,106 @@
+import {chromium,expect} from '@playwright/test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const base='http://127.0.0.1:8000';
+const resources=JSON.parse(fs.readFileSync('.preview/communication-test-resources.json','utf8'));
+const browser=await chromium.launch({channel:'msedge',headless:true});
+const errors=[];let admin;
+async function login(page,email,password='communication-test-password'){
+ await page.goto(base+'/login');await page.locator('input[name=email]').fill(email);await page.locator('input[name=password]').fill(password);await page.getByRole('button',{name:'Sign in'}).click();await page.waitForURL(url=>url.pathname!=='/login',{timeout:15000});
+}
+async function workspace(context,email){console.log('Checking account '+email);const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));await login(page,email);await expect(page).toHaveURL(/\/communication$/);await expect(page.locator('.comm-view-tabs')).toBeVisible();return page;}
+try{
+ const ctx=await browser.newContext({viewport:{width:1440,height:1000}});
+ admin=await ctx.newPage();admin.on('pageerror',e=>errors.push(e.message));
+ await login(admin,'admin@gmail.com','password');await expect(admin).toHaveURL(/\/admin$/);
+ await expect(admin.locator('.admin-tabs button').filter({hasText:'Plans'})).toHaveCount(0);
+ await admin.locator('.admin-tabs').getByRole('button',{name:'Communication',exact:true}).click();
+ await expect(admin.locator('.communication-management')).toBeVisible();
+ await expect(admin.getByRole('button',{name:'Send invitation',exact:true})).toBeVisible();
+ await admin.goto(base+'/communication');
+ await admin.getByRole('button',{name:'Send announcement',exact:true}).click();
+ await admin.locator('.comm-modal textarea').fill('An announcement for Skyinfinit members');
+ await admin.locator('.comm-company-picker label').filter({hasText:'Skyinfinit Test '+resources.suffix}).locator('input').check();
+ await admin.locator('.comm-announce-file input').setInputFiles({name:'company-note.txt',mimeType:'text/plain',buffer:Buffer.from('Private company announcement attachment')});
+ await admin.locator('.comm-modal').getByRole('button',{name:'Send announcement',exact:true}).click();
+ await expect(admin.locator('.comm-modal')).toHaveCount(0);
+ const empCtx=await browser.newContext({viewport:{width:1440,height:1000}});
+ const a=await workspace(empCtx,'comm-a-'+resources.suffix+'@example.test');
+ await expect(a.locator('.comm-alerts button')).toContainText('Skyinfinit Test');
+ await a.locator('.comm-alerts button').click();
+ await expect(a.locator('.comm-chat-heading h2')).toContainText('Skyinfinit Test');
+ await expect(a.locator('.comm-composer')).toHaveCount(0);
+ await expect(a.locator('.comm-message-actions button').filter({hasText:'Delete'})).toHaveCount(0);
+ await a.getByRole('button',{name:'Choose reaction',exact:true}).click();
+ await a.getByRole('button',{name:'React 👍',exact:true}).click();
+ await expect(a.locator('.comm-reactions button')).toContainText('👍 1');
+ await a.locator('.comm-view-tabs').getByRole('button',{name:'Chats',exact:true}).click();
+ await a.getByRole('button',{name:'New conversation'}).click();
+ await expect(a.locator('.comm-picker label').filter({hasText:'Outsider'})).toHaveCount(0);
+ await a.locator('.comm-picker label').filter({hasText:'Communication Test B'}).locator('input').check();
+ await a.locator('.comm-modal').getByRole('button',{name:'Create chat',exact:true}).click();
+ await expect(a.locator('.comm-chat-heading h2')).toHaveText('Communication Test B');
+ await a.locator('textarea[aria-label=Message]').fill('A message in our personal chat');
+ await a.getByRole('button',{name:'Insert emoji',exact:true}).click();
+ await expect(a.getByRole('dialog',{name:'Emoji picker',exact:true})).toBeVisible();
+ await a.getByRole('button',{name:'Insert 😀',exact:true}).click();
+ await expect(a.locator('textarea[aria-label=Message]')).toHaveValue('A message in our personal chat😀');
+ await a.locator('textarea[aria-label=Message]').press('Escape');
+ const started=Date.now();
+ const savedResponse=a.waitForResponse(r=>r.request().method()==='POST'&&/conversations\/\d+\/messages$/.test(r.url()));
+ await a.locator('.comm-send').click();
+ const saved=await (await savedResponse).json();assert.equal(saved.message.body,'A message in our personal chat😀');assert.deepEqual(saved.message.reactions,[]);assert.equal('attachment_path' in saved.message,false);
+ await expect(a.locator('.comm-bubble').filter({hasText:'A message in our personal chat😀'})).toBeVisible();
+ console.log('Send acknowledgement and visible bubble: '+(Date.now()-started)+' ms');
+ await expect(a.locator('.comm-bubble').filter({hasText:'A message in our personal chat'})).toBeVisible();
+ const bCtx=await browser.newContext();const b=await workspace(bCtx,'comm-b-'+resources.suffix+'@example.test');
+ await b.locator('.comm-conversations>button').filter({hasText:'Communication Test A'}).click();
+ await b.locator('textarea[aria-label=Message]').fill('A reply from B');await b.locator('.comm-send').click();
+ await expect(a.locator('.comm-bubble').filter({hasText:'A reply from B'})).toBeVisible({timeout:10000});
+
+ await a.getByRole('button',{name:'Open chat profile',exact:true}).click();
+ await expect(a.locator('.comm-detail-panel')).toBeVisible();
+ await expect(a.locator('.comm-member-card')).toContainText('comm-b-'+resources.suffix+'@example.test');
+ await a.locator('.comm-detail-tabs').getByRole('button',{name:'Search',exact:true}).click();
+ await a.getByRole('textbox',{name:'Search messages',exact:true}).fill('A reply from B');
+ await expect(a.locator('.comm-search-result')).toHaveCount(1);
+ await a.locator('.comm-search-result').click();
+ await expect(a.locator('.comm-message.highlighted')).toContainText('A reply from B');
+ await a.getByRole('textbox',{name:'Search messages',exact:true}).fill('does-not-exist-12345');
+ await expect(a.locator('.comm-detail-content')).toContainText('No matching messages.');
+ await expect(a.locator('.comm-bubble').filter({hasText:'A reply from B'})).toBeVisible();
+ await a.getByRole('button',{name:'Close chat details',exact:true}).click();
+ await a.locator('textarea[aria-label=Message]').fill('Helpful link https://example.com/team');
+ await a.locator('.comm-send').click();await expect(a.locator('.comm-bubble').filter({hasText:'Helpful link'})).toBeVisible();
+ await a.locator('.comm-file-input').setInputFiles({name:'shared-guide.txt',mimeType:'text/plain',buffer:Buffer.from('Shared guide')});
+ await a.locator('.comm-send').click();await expect(a.locator('.comm-bubble').filter({hasText:'shared-guide.txt'})).toBeVisible();
+ await a.getByRole('button',{name:'Open chat details',exact:true}).click();
+ await a.locator('.comm-detail-tabs').getByRole('button',{name:'Docs',exact:true}).click();
+ await expect(a.locator('.comm-document-card a')).toHaveText('shared-guide.txt');
+ const privateDownload=await a.request.get(base+await a.locator('.comm-document-card a').getAttribute('href'));assert.equal(privateDownload.status(),200);assert.equal(await privateDownload.text(),'Shared guide');
+ await a.locator('.comm-detail-tabs').getByRole('button',{name:'Links',exact:true}).click();
+ await expect(a.locator('.comm-link-card a')).toHaveAttribute('href','https://example.com/team');
+ await a.screenshot({path:'.preview/communication-details-desktop.png',fullPage:true});
+ await a.getByRole('button',{name:'Close chat details',exact:true}).click();
+ await a.locator('.account-menu summary').click();await a.locator('.account-theme').getByRole('button',{name:'dark',exact:true}).click();await expect(a.locator('html')).toHaveAttribute('data-theme','dark');await a.locator('.account-menu summary').click();
+ await a.screenshot({path:'.preview/communication-dark.png',fullPage:true});
+ await a.setViewportSize({width:390,height:844});await expect.poll(()=>a.evaluate(()=>document.documentElement.scrollWidth>innerWidth)).toBe(false);await a.screenshot({path:'.preview/communication-mobile.png',fullPage:true});
+
+ await a.getByRole('button',{name:'Open chat profile',exact:true}).click();
+ await expect(a.locator('.comm-detail-panel')).toBeVisible();
+ await expect.poll(()=>a.evaluate(()=>document.documentElement.scrollWidth>innerWidth)).toBe(false);
+ await a.screenshot({path:'.preview/communication-details-mobile.png',fullPage:true});
+ await a.getByRole('button',{name:'Close chat details',exact:true}).click();
+ await a.getByRole('button',{name:'Back to conversations'}).click();await expect(a.locator('.comm-sidebar')).toBeVisible();
+ const managerCtx=await browser.newContext();const manager=await workspace(managerCtx,'comm-manager-'+resources.suffix+'@example.test');
+ await expect(manager.getByRole('button',{name:'Send announcement',exact:true})).toHaveCount(0);
+ await manager.getByRole('button',{name:'Communities & invitations',exact:true}).click();await expect(manager.locator('.communication-management')).toBeVisible();await expect(manager.getByRole('button',{name:'Create community',exact:true})).toHaveCount(0);await expect(manager.locator('.comm-modal select option:not([disabled])')).toHaveCount(1);
+ const outsiderCtx=await browser.newContext();const outsider=await workspace(outsiderCtx,'comm-outsider-'+resources.suffix+'@example.test');await expect(outsider.locator('.comm-alerts')).toHaveCount(0);await outsider.locator('.comm-view-tabs').getByRole('button',{name:'Communities',exact:true}).click();await expect(outsider.locator('.comm-conversations>button')).toHaveCount(1);await expect(outsider.locator('.comm-conversations>button')).toContainText('Cruxlo Test');
+ const inviteCtx=await browser.newContext();const invited=await inviteCtx.newPage();invited.on('pageerror',e=>errors.push(e.message));await invited.goto(base+resources.invitation_url);await expect(invited.locator('.invitation-page h1')).toContainText('Skyinfinit Test');await invited.locator('input[name=name]').fill('Invited employee');await invited.locator('input[name=password]').fill('new-member-password-123');await invited.locator('input[name=password_confirmation]').fill('new-member-password-123');await invited.getByRole('button',{name:'Accept and join'}).click();await expect(invited).toHaveURL(/\/communication$/);await expect(invited.locator('.comm-conversations>button').filter({hasText:'Browser Project Group'})).toBeVisible();
+ await invited.locator('.account-menu summary').click();await invited.locator('.account-dropdown').getByRole('button',{name:'Sign out',exact:true}).click();await expect(invited).toHaveURL(base+'/');await login(invited,'comm-invite-'+resources.suffix+'@example.test','new-member-password-123');await expect(invited).toHaveURL(/\/communication$/);
+ await admin.locator('.comm-admin-bar select').selectOption(String(resources.users[0]));await expect(admin.locator('.comm-review-banner')).toContainText('Communication Test A');await admin.locator('.comm-conversations>button').filter({hasText:'Communication Test B'}).click();await expect(admin.locator('.comm-composer')).toHaveCount(0);await expect(admin.locator('.comm-bubble').filter({hasText:'A reply from B'})).toBeVisible();await admin.screenshot({path:'.preview/communication-admin-review.png',fullPage:true});
+ assert.deepEqual(errors,[]);console.log('Community browser checks passed: admin tab, targeted attachment announcement, alerts, reactions, scoped contacts, messaging, theme, mobile layout, delegated admin controls, invitation acceptance, repeat login, and read-only review. No test emails sent.');
+}finally{
+ if(admin){try{const u=await (await admin.request.get(base+'/admin/api')).json();resources.users=[...new Set([...resources.users,...u.users.filter(p=>p.email.endsWith('-'+resources.suffix+'@example.test')).map(p=>p.id)])];const d=await(await admin.request.get(base+'/communication/api')).json();resources.conversations=[...new Set([...resources.conversations,...d.conversations.filter(c=>resources.companies.includes(c.company_id)||c.members.some(p=>resources.users.includes(p.id))).map(c=>c.id)])];}catch{}}
+ fs.writeFileSync('.preview/communication-test-resources.json',JSON.stringify(resources));await browser.close();
+}
