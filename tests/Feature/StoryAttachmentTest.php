@@ -36,7 +36,7 @@ class StoryAttachmentTest extends TestCase
         $peer = $this->employee();
         $peer->forceFill(['company_id' => $company])->save();
         $outsider = $this->employee();
-        $id = $this->actingAs($manager)->post('/communication/api/stories', ['title' => 'Company photo', 'attachment' => $this->image()], ['Accept' => 'application/json'])->assertCreated()->json('id');
+        $id = $this->actingAs($manager)->post('/communication/api/stories', ['attachment' => $this->image()], ['Accept' => 'application/json'])->assertCreated()->json('id');
         $this->assertDatabaseHas('communication_stories', ['id' => $id, 'author_id' => $manager->id, 'company_id' => $company]);
         $this->getJson("/communication/api/stories/$id/viewers")->assertOk();
         $this->deleteJson("/communication/api/stories/$id")->assertForbidden();
@@ -45,7 +45,7 @@ class StoryAttachmentTest extends TestCase
         $this->getJson("/communication/api/stories/$id/viewers")->assertForbidden();
         $this->actingAs($outsider)->get("/communication/api/stories/$id/attachment")->assertNotFound();
         $this->postJson("/communication/api/stories/$id/view")->assertNotFound();
-        $this->getJson('/communication/api')->assertJsonMissing(['title' => 'Company photo']);
+        $this->getJson('/communication/api')->assertJsonMissing(['title' => 'Status', 'author_id' => $manager->id]);
         $this->actingAs($manager)->getJson("/communication/api/stories/$id/viewers")->assertJsonPath('total', 1);
         $manager->forceFill(['communication_admin' => false])->save();
         $this->postJson('/communication/api/stories', ['title' => 'Blocked', 'body' => 'No'])->assertForbidden();
@@ -89,8 +89,8 @@ class StoryAttachmentTest extends TestCase
 
     public function test_story_validation_keeps_text_support_and_rejects_unsafe_or_large_files(): void
     {
-        $this->withSession(['judibas_admin' => true])->postJson('/communication/api/stories', ['title' => 'Text story', 'body' => 'Still supported'])->assertCreated();
-        $this->postJson('/communication/api/stories', ['title' => 'Empty story', 'body' => '   '])->assertUnprocessable();
+        $this->withSession(['judibas_admin' => true])->postJson('/communication/api/stories', ['body' => 'Still supported'])->assertCreated();
+        $this->postJson('/communication/api/stories', ['body' => '   '])->assertUnprocessable();
         $this->post('/communication/api/stories', ['title' => 'Unsafe file', 'attachment' => UploadedFile::fake()->createWithContent('test.html', '<html>unsafe</html>')], ['Accept' => 'application/json'])->assertUnprocessable();
         $this->post('/communication/api/stories', ['title' => 'Large file', 'attachment' => UploadedFile::fake()->create('large.pdf', 21000, 'application/pdf')], ['Accept' => 'application/json'])->assertUnprocessable();
     }

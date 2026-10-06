@@ -20,7 +20,7 @@ foreach ($r['users'] as $id) {
     }
 }
 $paths = DB::table('communication_messages')->whereIn('conversation_id', $r['conversations'])->whereNotNull('attachment_path')->pluck('attachment_path')->all();
-$paths = array_merge($paths, DB::table('communication_stories')->whereIn('id', $r['stories'] ?? [])->where('title', 'Browser story')->whereNotNull('attachment_path')->pluck('attachment_path')->all());
+$paths = array_merge($paths, DB::table('communication_stories')->whereIn('id', $r['stories'] ?? [])->whereIn('title', ['Browser story', 'Status'])->whereNotNull('attachment_path')->pluck('attachment_path')->all());
 $paths = array_merge($paths, User::whereIn('id', $r['users'])->whereNotNull('profile_photo_path')->pluck('profile_photo_path')->all());
 DB::transaction(function () use ($r) {
     DB::table('communication_audits')->where(function ($q) use ($r) {
@@ -29,7 +29,7 @@ DB::transaction(function () use ($r) {
     DB::table('communication_invitations')->whereIn('id', $r['invitations'] ?? [])->delete();
     DB::table('communication_conversations')->whereIn('id', $r['conversations'])->delete();
     DB::table('communication_teams')->whereIn('id', $r['teams'] ?? [])->where('name', 'Browser Test Team')->delete();
-    DB::table('communication_stories')->whereIn('id', $r['stories'] ?? [])->where('title', 'Browser story')->delete();
+    DB::table('communication_stories')->whereIn('id', $r['stories'] ?? [])->whereIn('title', ['Browser story', 'Status'])->delete();
     User::whereIn('id', $r['users'])->delete();
     DB::table('communication_companies')->whereIn('id', $r['companies'] ?? [])->delete();
 });

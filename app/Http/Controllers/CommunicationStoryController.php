@@ -47,12 +47,12 @@ class CommunicationStoryController extends Controller
     {
         Access::mutable($r);
         abort_unless(Access::manager($r), 403); abort_unless(Access::super($r) || Access::company() !== null, 403, 'A company is required to publish stories.');
-        $v = $r->validate(['title' => 'required|string|max:100', 'body' => 'nullable|string|max:3000', 'attachment' => 'nullable|file|max:20480|mimes:jpg,jpeg,png,webp,mp4,webm,mp3,wav,m4a,pdf,txt,csv,doc,docx,xls,xlsx,zip']);
+        $v = $r->validate(['title' => 'nullable|string|max:100', 'body' => 'nullable|string|max:3000', 'attachment' => 'nullable|file|max:20480|mimes:jpg,jpeg,png,webp,mp4,webm,mp3,wav,m4a,pdf,txt,csv,doc,docx,xls,xlsx,zip']);
         abort_unless(trim($v['body'] ?? '') !== '' || $r->hasFile('attachment'), 422, 'Add story text or an attachment.');
         $file = $r->file('attachment');
         $path = $file ? $file->store('communication-stories', 'local') : null;
         try {
-            $id = DB::table('communication_stories')->insertGetId(['author_id' => Access::super($r) ? null : $r->user()->id, 'company_id' => Access::super($r) ? null : Access::company(), 'title' => $v['title'], 'body' => $v['body'] ?? '', 'attachment_path' => $path, 'attachment_name' => $file?->getClientOriginalName(), 'attachment_mime' => $file?->getMimeType(), 'expires_at' => now()->addDay(), 'created_at' => now(), 'updated_at' => now()]);
+            $id = DB::table('communication_stories')->insertGetId(['author_id' => Access::super($r) ? null : $r->user()->id, 'company_id' => Access::super($r) ? null : Access::company(), 'title' => $v['title'] ?? 'Status', 'body' => $v['body'] ?? '', 'attachment_path' => $path, 'attachment_name' => $file?->getClientOriginalName(), 'attachment_mime' => $file?->getMimeType(), 'expires_at' => now()->addDay(), 'created_at' => now(), 'updated_at' => now()]);
         } catch (\Throwable $e) {
             if ($path) {
                 Storage::disk('local')->delete($path);
