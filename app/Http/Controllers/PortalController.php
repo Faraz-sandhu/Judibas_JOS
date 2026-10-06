@@ -21,7 +21,6 @@ class PortalController extends Controller
         if ($request->is('login') && Auth::check()) {
             return redirect('/');
         }
-        if ($request->is('products/communication') && $slug === 'communication' && Auth::check() && ! $request->session()->get('judibas_admin')) { \App\Services\CommunicationAccess::authorize($request); return redirect('/communication'); }
         $products = PortalContent::products();
         $product = $slug ? collect($products)->firstWhere('slug', $slug) : null;
         if ($slug && ! $product) {

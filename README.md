@@ -88,6 +88,6 @@ The Status tab has a WhatsApp-style directory with author photos, My updates, Re
 
 ## Product-specific Communication management
 
-Super Admin opens /products/communication for the product overview: chats, Communication users, companies and communities, invitations, status and announcements, conversation review, and review logs. No Communication item is added to the portal sidebar. Signed-in employees with Communication access are redirected from the product page straight to /communication. Delegated admins keep their company-scoped onboarding tools in chat.
+Super Admin opens /products/communication for the product overview: chats, Communication users, companies and communities, invitations, status and announcements, conversation review, and review logs. No Communication item is added to the portal sidebar. The product introduction page is retained. Start Communication opens the management overview for Super Admin and /communication chats for employees. Delegated admins keep their company-scoped onboarding tools in chat.
 
 Website Administration manages shared employee accounts and other product permissions. Communication access and admin roles are managed within the product. Removing access there preserves the global employee account and other product permissions. A company is required when granting Communication access; global accounts without Communication can remain unassigned.

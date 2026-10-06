@@ -12,7 +12,8 @@ class CommunicationModuleTest extends TestCase {
   $user=User::factory()->create(['is_active'=>true,'communication_admin'=>true]);
   DB::table('user_product_access')->insert(['user_id'=>$user->id,'product_slug'=>'communication']);
   $this->actingAs($user)->getJson('/communication/api/users')->assertForbidden();
-  $this->get('/products/communication')->assertRedirect('/communication');
+  $this->get('/products/communication')->assertOk();
+  $this->get('/communication')->assertOk();
   $this->withSession(['judibas_admin'=>true])->get('/products/communication')->assertOk();
   $this->getJson('/communication/api/users')->assertOk()->assertJsonMissingPath('blogs');
  }
