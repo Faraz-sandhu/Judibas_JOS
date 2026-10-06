@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, reactive } from 'vue';
+import { computed, ref, reactive, onMounted, onBeforeUnmount } from 'vue';
 import AdminPanel from './AdminPanel.vue';
 import Communication from './Communication.vue';
 import CommunicationOverview from './CommunicationOverview.vue';
@@ -10,6 +10,12 @@ declare global {interface Window {portal:{name:string;tagline:string;logo:string
 const portal=reactive(window.portal);
 const communicationWorkspace=window.location.pathname==='/communication';
 const communicationManagement=!!new URLSearchParams(location.search).get('manage');
+const accountMenu=ref<HTMLDetailsElement|null>(null),accountOpen=ref(false);
+function accountToggle(event:Event){accountOpen.value=(event.target as HTMLDetailsElement).open;}
+function closeAccountOutside(event:PointerEvent){if(event.target instanceof Node&&!accountMenu.value?.contains(event.target)&&accountMenu.value)accountMenu.value.open=false;}
+function closeAccountEscape(event:KeyboardEvent){if(event.key==='Escape'&&accountMenu.value?.open){accountMenu.value.open=false;accountMenu.value.querySelector<HTMLElement>('summary')?.focus();}}
+onMounted(()=>{document.addEventListener('pointerdown',closeAccountOutside);document.addEventListener('keydown',closeAccountEscape);});
+onBeforeUnmount(()=>{document.removeEventListener('pointerdown',closeAccountOutside);document.removeEventListener('keydown',closeAccountEscape);});
 const logoFailed=ref(false);
 const csrf=ref(document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content);
 function accountUpdated(name:string,token:string){if(portal.employee)portal.employee.name=name;csrf.value=token;const meta=document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]');if(meta)meta.content=token;}
@@ -67,7 +73,7 @@ const title=computed(()=>portal.settingsPage?'Administration':portal.product?.na
 <a class="skip-link" href="#main">Skip to content</a>
 <aside v-if="!communicationWorkspace" class="rail" aria-label="Site navigation"><a href="/" class="rail-brand" :aria-label="portal.name+' home'"><img v-if="portal.logo&&!logoFailed" @error="logoFailed=true" :src="portal.logoIcon || portal.logo" :class="{'company-logo': !!portal.logoIcon}" alt=""><span v-else>J</span><span class="rail-brand-name">{{ portal.name }}</span></a><nav><a v-for="(item,index) in navigation" :key="item.title" :href="item.href" :title="item.title" :aria-label="item.title" :class="{'rail-divider':index===5||index===8,'active':portal.productsPage&&item.title==='Products'}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path :d="item.path"/></svg><span class="rail-label">{{ item.title }}</span><span class="rail-tooltip">{{ item.title }}</span></a></nav></aside>
 <div class="site-shell" :class="{'communication-shell':communicationWorkspace}">
-<header class="topbar"><div class="breadcrumbs"><a href="/">{{ portal.name }}</a><span>&rsaquo;</span><a v-if="portal.product" href="/products">Products</a><span v-if="portal.product">&rsaquo;</span><span>{{ title }}</span></div><details v-if="portal.employee||portal.admin" class="account-menu"><summary><span class="account-name">{{ portal.admin?'Super Admin':portal.employee?.name }}</span><span aria-hidden="true">&#9662;</span></summary><div class="account-dropdown"><p>{{ portal.admin?'Super Admin':portal.employee?.email }}</p><a href="/communication">Communication</a><a v-if="portal.admin" href="/admin">Administration</a><div class="account-theme"><span>Appearance</span><button v-for="value in ['light','dark','auto']" :key="value" @click="setTheme(value)" :aria-pressed="theme===value">{{ value }}</button></div><form action="/logout" method="post"><input type="hidden" name="_token" :value="csrf"><button>Sign out</button></form></div></details><a v-else class="top-action" href="/login">Log in <span>&rarr;</span></a></header>
+<header class="topbar"><div class="breadcrumbs"><a href="/">{{ portal.name }}</a><span>&rsaquo;</span><a v-if="portal.product" href="/products">Products</a><span v-if="portal.product">&rsaquo;</span><span>{{ title }}</span></div><details v-if="portal.employee||portal.admin" class="account-menu" ref="accountMenu" @toggle="accountToggle"><summary :aria-expanded="accountOpen" aria-controls="account-dropdown"><span class="account-name">{{ portal.admin?'Super Admin':portal.employee?.name }}</span><svg class="account-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary><div class="account-dropdown" id="account-dropdown"><p>{{ portal.admin?'Super Admin':portal.employee?.email }}</p><a href="/communication">Communication</a><a v-if="portal.admin" href="/admin">Administration</a><div class="account-theme"><span>Appearance</span><button v-for="value in ['light','dark','auto']" :key="value" @click="setTheme(value)" :aria-pressed="theme===value">{{ value }}</button></div><form action="/logout" method="post"><input type="hidden" name="_token" :value="csrf"><button>Sign out</button></form></div></details><a v-else class="top-action" href="/login">Log in <span>&rarr;</span></a></header>
 <main id="main"><InvitationAcceptance v-if="portal.invitation" :invitation="portal.invitation" :csrf="csrf" :errors="portal.validationErrors"/><Communication v-else-if="communicationWorkspace" :csrf="csrf" @profile-updated="accountUpdated"/><template v-else>
 <template v-if="portal.settingsPage">
 <AdminPanel v-if="portal.admin" :name="portal.name" :tagline="portal.tagline" :logo="portal.logo" :csrf="csrf" :success="portal.success" :errors="portal.validationErrors"/>
