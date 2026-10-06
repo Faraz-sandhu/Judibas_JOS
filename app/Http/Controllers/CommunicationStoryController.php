@@ -10,6 +10,11 @@ use Illuminate\Support\Facades\Storage;
 
 class CommunicationStoryController extends Controller
 {
+    public function index(Request $r)
+    {
+        return response()->json(['stories' => self::listing($r)])->header('Cache-Control', 'private, no-store');
+    }
+
     public static function listing(Request $r)
     {
         $stories = self::visible($r)->orderByDesc('id')->get();

@@ -43,6 +43,15 @@ async function api(path:string,method='GET',body?:any,extra:Record<string,string
  if(!response.ok){const issue=await response.json().catch(()=>({}));throw new Error(Object.values(issue.errors||{}).flat().join(' ')||issue.message||'Unable to complete this action.');}
  return response.json();
 }
+let storiesPolling=false,lastStorySync=0;
+async function syncStories(){
+ if(storiesPolling||!data.value||document.hidden||reviewing.value)return;
+ storiesPolling=true;lastStorySync=Date.now();const review=viewUser.value;
+ try{const result=await api('/stories');if(review!==viewUser.value||!data.value)return;data.value.stories=result.stories;if(story.value&&!result.stories.some((s:Story)=>s.id===story.value?.id))story.value=null;}
+ catch{/* Retry on the next tick after a temporary connection failure. */}
+ finally{storiesPolling=false;}
+}
+function resumeStories(){if(!document.hidden)void syncStories();}
 async function refresh(){
  if(refreshing.value||reviewing.value)return;
  refreshing.value=true;const version=generation;
@@ -133,8 +142,8 @@ function timestamp(value:string){return new Date(value.replace(' ','T')+'Z').toL
 function attached(event:Event){file.value=(event.target as HTMLInputElement).files?.[0]||null;}
 function storyAttachment(s:Story,download=false){const query=new URLSearchParams();if(viewUser.value)query.set('view_user',viewUser.value);if(download)query.set('download','1');return s.attachment_url+(query.size?'?'+query.toString():'');}
 function download(m:Message){return m.attachment_url+(viewUser.value?'?view_user='+viewUser.value:'');}
-onMounted(async()=>{await refresh();timer=setInterval(()=>{storyClock.value=Date.now();if(story.value&&parseChatDate(story.value.expires_at).getTime()<=storyClock.value)story.value=null;if(document.hidden||reviewing.value||refreshing.value||sending.value||polling)return;ticks++;polling=true;const task=ticks%15===0||(!active.value&&ticks%3===0)?refresh():active.value?loadMessages():Promise.resolve();void task.catch(e=>{error.value=(e as Error).message;}).finally(()=>{polling=false;});},1000);});
-onBeforeUnmount(()=>{if(timer)clearInterval(timer);generation++;});
+onMounted(async()=>{document.addEventListener('visibilitychange',resumeStories);window.addEventListener('focus',resumeStories);await refresh();timer=setInterval(()=>{storyClock.value=Date.now();if(storyClock.value-lastStorySync>=2000)void syncStories();if(story.value&&parseChatDate(story.value.expires_at).getTime()<=storyClock.value)story.value=null;if(document.hidden||reviewing.value||refreshing.value||sending.value||polling)return;ticks++;polling=true;const task=ticks%15===0||(!active.value&&ticks%3===0)?refresh():active.value?loadMessages():Promise.resolve();void task.catch(e=>{error.value=(e as Error).message;}).finally(()=>{polling=false;});},1000);});
+onBeforeUnmount(()=>{document.removeEventListener('visibilitychange',resumeStories);window.removeEventListener('focus',resumeStories);if(timer)clearInterval(timer);generation++;});
 </script>
 
 <template>

@@ -40,6 +40,7 @@ Route::post('/communication/api/conversations/{id}/messages', [CommunicationCont
 Route::patch('/communication/api/messages/{id}', [CommunicationController::class, 'updateMessage'])->whereNumber('id');
 Route::delete('/communication/api/messages/{id}', [CommunicationController::class, 'deleteMessage'])->whereNumber('id');
 Route::get('/communication/api/attachments/{id}', [CommunicationController::class, 'attachment'])->whereNumber('id');
+Route::get('/communication/api/stories', [CommunicationStoryController::class, 'index']);
 Route::post('/communication/api/stories', [CommunicationStoryController::class, 'store']);
 Route::delete('/communication/api/stories/{id}', [CommunicationStoryController::class, 'destroy'])->whereNumber('id');
 
