@@ -50,6 +50,16 @@ class StoryAttachmentTest extends TestCase
         $manager->forceFill(['communication_admin' => false])->save();
         $this->postJson('/communication/api/stories', ['title' => 'Blocked', 'body' => 'No'])->assertForbidden();
     }
+    public function test_text_formatting_is_persisted_and_validated(): void
+    {
+        $id = $this->withSession(['judibas_admin' => true])->postJson('/communication/api/stories', ['body' => 'Styled status', 'text_style' => ['bold' => '1', 'italic' => '0', 'underline' => '1', 'color' => '#ffffff', 'background' => '#075e54', 'font' => 'serif', 'size' => '32', 'align' => 'left']])->assertCreated()->json('id');
+        $story = collect($this->getJson('/communication/api/stories')->assertOk()->json('stories'))->firstWhere('id', $id);
+        $this->assertSame(true, $story['text_style']['bold']);
+        $this->assertSame(false, $story['text_style']['italic']);
+        $this->assertSame(32, $story['text_style']['size']);
+        $this->assertSame('#075e54', $story['text_style']['background']);
+        $this->postJson('/communication/api/stories', ['body' => 'Invalid', 'text_style' => ['color' => 'url(https://example.com)', 'font' => 'arbitrary', 'size' => 400]])->assertUnprocessable()->assertJsonValidationErrors(['text_style.color', 'text_style.font', 'text_style.size']);
+    }
     private function image(): UploadedFile
     {
         return UploadedFile::fake()->createWithContent('story.png', base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='));
