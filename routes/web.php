@@ -5,8 +5,13 @@ use App\Http\Controllers\CommunicationActionsController;
 use App\Http\Controllers\CommunicationController;
 use App\Http\Controllers\CommunicationManagementController;
 use App\Http\Controllers\CommunicationStoryController;
+use App\Http\Controllers\CommunicationUsersController;
 use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\PortalController;
+use App\Services\CommunicationAccess;
+use Illuminate\Auth\GenericUser;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', [PortalController::class, 'index']);
@@ -64,6 +69,16 @@ Route::get('/communication/api/stories/{id}/attachment', [CommunicationStoryCont
 Route::post('/communication/api/stories/{id}/view', [CommunicationStoryController::class, 'viewed'])->whereNumber('id');
 Route::get('/communication/api/stories/{id}/viewers', [CommunicationStoryController::class, 'viewers'])->whereNumber('id');
 
-Route::get('/communication/api/users', [\App\Http\Controllers\CommunicationUsersController::class, 'data']);
-Route::post('/communication/api/users/{id?}', [\App\Http\Controllers\CommunicationUsersController::class, 'save'])->whereNumber('id');
-Route::delete('/communication/api/users/{id}', [\App\Http\Controllers\CommunicationUsersController::class, 'remove'])->whereNumber('id');
+Route::get('/communication/api/users', [CommunicationUsersController::class, 'data']);
+Route::post('/communication/api/users/{id?}', [CommunicationUsersController::class, 'save'])->whereNumber('id');
+Route::delete('/communication/api/users/{id}', [CommunicationUsersController::class, 'remove'])->whereNumber('id');
+
+Route::post('/broadcasting/auth', function (Request $r) {
+    CommunicationAccess::authorize($r);
+    $r->validate(['socket_id' => 'required|string|max:100', 'channel_name' => 'required|string|max:200']);
+    if (CommunicationAccess::super($r)) {
+        $r->setUserResolver(fn () => new GenericUser(['id' => 'super']));
+    }
+
+    return Broadcast::connection('reverb')->auth($r);
+});

@@ -7,14 +7,18 @@ import {parseChatDate,conversationTime} from './chatTime';
 import MessageActions from './MessageActions.vue';
 import CommunicationProfile from './CommunicationProfile.vue';
 import StatusPanel from './StatusPanel.vue';
+import {connectCommunication} from './realtime';
 const pinned=ref<{id:number;body:string|null;sender_name:string;attachment_name:string|null}[]>([]),forwardMessage=ref<Message|null>(null),forwardTarget=ref(''),forwardFilter=ref(''),notice=ref('');
 const detailMode=ref(''),highlight=ref<number|null>(null);
 async function jumpToMessage(id:number){if(!active.value)return;const chat=active.value,version=generation;try{const result=await api('/conversations/'+chat+'/messages','GET',undefined,{around:String(id)});if(chat!==active.value||version!==generation)return;messages.value=result.messages;more.value=result.messages.length>=25;highlight.value=id;await nextTick();document.getElementById('chat-message-'+id)?.scrollIntoView({block:'center',behavior:'smooth'});}catch(e){error.value=(e as Error).message;}}
 function shortTime(value:string){return new Date(value.replace(' ','T')+'Z').toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}
 function dayLabel(value:string){return new Date(value.replace(' ','T')+'Z').toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'});}
 const composerInput=ref<HTMLTextAreaElement|null>(null);
-let polling=false;
-let backgroundRequest:AbortController|undefined;
+const connectionState=ref('connecting');
+const liveConversations=new Set<number>();
+let disconnectRealtime:(()=>void)|undefined,liveTimer:ReturnType<typeof setTimeout>|undefined,liveDirty=false,disposed=false,liveFlushing=false;
+function queueLiveRefresh(event?:{kind:string;conversation_id:number|null}){if(disposed)return;if(event?.conversation_id)liveConversations.add(event.conversation_id);liveDirty=true;if(liveTimer)return;liveTimer=setTimeout(async()=>{liveTimer=undefined;if(sending.value||refreshing.value||reviewing.value||liveFlushing){queueLiveRefresh();return;}liveDirty=false;liveFlushing=true;const chat=active.value,updateMessages=chat&&liveConversations.has(chat);liveConversations.clear();if(updateMessages){try{await loadMessages();}catch{/* The snapshot below handles removed chats. */}await refresh(false);}else await refresh();liveFlushing=false;if(liveDirty)queueLiveRefresh();},50);}
+
 async function insertEmoji(emoji:string){const input=composerInput.value;const start=input?.selectionStart??draft.value.length,end=input?.selectionEnd??start;if(draft.value.length-(end-start)+emoji.length>10000)return;draft.value=draft.value.slice(0,start)+emoji+draft.value.slice(end);await nextTick();input?.focus();input?.setSelectionRange(start+emoji.length,start+emoji.length);}
 const props=defineProps<{csrf?:string}>();
 const emit=defineEmits<{profileUpdated:[name:string,csrf:string]}>();
@@ -32,7 +36,7 @@ function clearStoryAttachment(){storyFile.value=null;if(storyInput.value)storyIn
 const workspaceInfo=ref(false);
 const section=ref('Chats'), announcementCompanies=ref<number[]>([]), announcementFile=ref<File|null>(null);
 const storyClock=ref(Date.now());
-let timer:ReturnType<typeof setInterval>|undefined, generation=0, ticks=0;
+let timer:ReturnType<typeof setInterval>|undefined, generation=0;
 const monitoring=computed(()=>!!viewUser.value);
 const current=computed(()=>data.value?.conversations.find(c=>c.id===active.value&&(section.value==='Communities'?c.kind==='community':c.kind!=='community')));
 const conversations=computed(()=>data.value?.conversations.filter(c=>(section.value==='Communities'?c.kind==='community':c.kind!=='community')&&(c.name+' '+(c.company_name||'')).toLowerCase().includes(filter.value.toLowerCase()))||[]);
@@ -45,15 +49,7 @@ async function api(path:string,method='GET',body?:any,extra:Record<string,string
  if(!response.ok){const issue=await response.json().catch(()=>({}));throw new Error(Object.values(issue.errors||{}).flat().join(' ')||issue.message||'Unable to complete this action.');}
  return response.json();
 }
-let storiesPolling=false,lastStorySync=0;
-async function syncStories(){
- if(storiesPolling||!data.value||document.hidden||reviewing.value||sending.value||refreshing.value||polling)return;
- storiesPolling=true;lastStorySync=Date.now();const review=viewUser.value;
- try{const result=await api('/stories');if(review!==viewUser.value||!data.value)return;data.value.stories=result.stories;if(story.value&&!result.stories.some((s:Story)=>s.id===story.value?.id))story.value=null;}
- catch{/* Retry on the next tick after a temporary connection failure. */}
- finally{storiesPolling=false;}
-}
-function resumeStories(){if(!document.hidden)void syncStories();}
+function resumeStories(){if(!document.hidden)queueLiveRefresh();}
 async function refresh(withMessages=true){
  if(refreshing.value||reviewing.value)return;
  refreshing.value=true;const version=generation;
@@ -73,7 +69,7 @@ async function loadMessages(audit=false,older=false,signal?:AbortSignal){
  if(!data.value?.admin&&current.value)current.value.unread=0;
  if(audit||(changed&&!older&&nearBottom&&!highlight.value)){await nextTick();list.value?.scrollTo({top:list.value.scrollHeight});}
 }
-async function open(c:Conversation){backgroundRequest?.abort();if(c.kind==='community')section.value='Communities';else section.value='Chats';generation++;detailMode.value='';highlight.value=null;active.value=c.id;pinned.value=[];messages.value=[];reply.value=null;search.value='';draft.value='';file.value=null;error.value='';try{await loadMessages(true);}catch(e){error.value=(e as Error).message;}}
+async function open(c:Conversation){if(c.kind==='community')section.value='Communities';else section.value='Chats';generation++;detailMode.value='';highlight.value=null;active.value=c.id;pinned.value=[];messages.value=[];reply.value=null;search.value='';draft.value='';file.value=null;error.value='';try{await loadMessages(true);}catch(e){error.value=(e as Error).message;}}
 async function changeReview(){
  reviewing.value=true;generation++;active.value=null;messages.value=[];error.value='';
  try{data.value=await api(viewUser.value?'/review':'',viewUser.value?'POST':'GET',viewUser.value?{view_user:Number(viewUser.value)}:undefined);}catch(e){error.value=(e as Error).message;}finally{reviewing.value=false;}
@@ -81,7 +77,7 @@ async function changeReview(){
 async function send(){
  if(!active.value||sending.value||monitoring.value||(!draft.value.trim()&&!file.value))return;
  const id=active.value,version=generation,body=draft.value,attachment=file.value,replyTo=reply.value;
- backgroundRequest?.abort();highlight.value=null;sending.value=true;error.value='';
+ highlight.value=null;sending.value=true;error.value='';
  try{
  const form=new FormData();form.append('body',body);if(replyTo)form.append('reply_to',String(replyTo.id));if(attachment)form.append('attachment',attachment);
  const result=await api('/conversations/'+id+'/messages','POST',form);
@@ -158,8 +154,8 @@ function timestamp(value:string){return new Date(value.replace(' ','T')+'Z').toL
 function attached(event:Event){file.value=(event.target as HTMLInputElement).files?.[0]||null;}
 function storyAttachment(s:Story,download=false){const query=new URLSearchParams();if(viewUser.value)query.set('view_user',viewUser.value);if(download)query.set('download','1');return s.attachment_url+(query.size?'?'+query.toString():'');}
 function download(m:Message){return m.attachment_url+(viewUser.value?'?view_user='+viewUser.value:'');}
-onMounted(async()=>{document.addEventListener('pointerup',releaseStatus);document.addEventListener('pointercancel',releaseStatus);document.addEventListener('visibilitychange',resumeStories);window.addEventListener('focus',resumeStories);await refresh();const entry=new URLSearchParams(location.search);if(entry.get('section')==='Status')section.value='Status';if(data.value?.admin){if(entry.get('action')==='review')workspaceInfo.value=true;else if(entry.get('action')==='audit')await showAudits();else if(entry.get('action')==='announcement')newModal('announcement');}timer=setInterval(()=>{storyClock.value=Date.now();if(storyClock.value-lastStorySync>=2000)void syncStories();if(story.value&&parseChatDate(story.value.expires_at).getTime()<=storyClock.value)story.value=null;if(document.hidden||reviewing.value||refreshing.value||sending.value||polling)return;ticks++;polling=true;const task=ticks%5===0||(!active.value&&ticks%3===0)?refresh(false):active.value?(backgroundRequest=new AbortController(),loadMessages(false,false,backgroundRequest.signal)):Promise.resolve();void task.catch(e=>{if((e as Error).name!=='AbortError')error.value=(e as Error).message;}).finally(()=>{polling=false;});},1000);});
-onBeforeUnmount(()=>{backgroundRequest?.abort();if(playbackTimer)clearInterval(playbackTimer);document.removeEventListener('pointerup',releaseStatus);document.removeEventListener('pointercancel',releaseStatus);document.removeEventListener('visibilitychange',resumeStories);window.removeEventListener('focus',resumeStories);if(timer)clearInterval(timer);generation++;});
+onMounted(async()=>{document.addEventListener('pointerup',releaseStatus);document.addEventListener('pointercancel',releaseStatus);document.addEventListener('visibilitychange',resumeStories);window.addEventListener('focus',resumeStories);await refresh();const entry=new URLSearchParams(location.search);if(entry.get('section')==='Status')section.value='Status';if(data.value?.admin){if(entry.get('action')==='review')workspaceInfo.value=true;else if(entry.get('action')==='audit')await showAudits();else if(entry.get('action')==='announcement')newModal('announcement');}disconnectRealtime=connectCommunication(data.value?.admin?'super':String(data.value?.profile?.id),()=>props.csrf||'',event=>queueLiveRefresh(event),state=>{connectionState.value=state;},()=>queueLiveRefresh());timer=setInterval(()=>{storyClock.value=Date.now();if(story.value&&parseChatDate(story.value.expires_at).getTime()<=storyClock.value)story.value=null;},1000);});
+onBeforeUnmount(()=>{disposed=true;disconnectRealtime?.();if(liveTimer)clearTimeout(liveTimer);if(playbackTimer)clearInterval(playbackTimer);document.removeEventListener('pointerup',releaseStatus);document.removeEventListener('pointercancel',releaseStatus);document.removeEventListener('visibilitychange',resumeStories);window.removeEventListener('focus',resumeStories);if(timer)clearInterval(timer);generation++;});
 </script>
 
 <template>
@@ -169,6 +165,7 @@ onBeforeUnmount(()=>{backgroundRequest?.abort();if(playbackTimer)clearInterval(p
  <button v-for="item in [{name:'Chats',path:'M4 4h16v12H9l-5 4V4m4 4h8m-8 4h6'},{name:'Status',path:'M9 3a9 9 0 0 0-6 8m1 6a9 9 0 0 0 14 2m3-6A9 9 0 0 0 15 3M17 12a5 5 0 1 1-10 0 5 5 0 0 1 10 0'},{name:'Communities',path:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2m20 0v-2a4 4 0 0 0-3-4m-6-8a4 4 0 1 1-8 0 4 4 0 0 1 8 0m3-4a4 4 0 0 1 0 8'}]" :key="item.name" @click="section=item.name;detailMode=''" :class="{active:section===item.name}" :aria-label="item.name" :title="item.name" :aria-pressed="section===item.name"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path :d="item.path"/></svg></button>
  <div class="comm-rail-bottom"><button v-if="data?.manager&&!monitoring" aria-label="Communities and invitations" title="Communities and invitations" @click="newModal('management')"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="6" width="16" height="14" rx="2"/><path d="M8 6V4h8v2m-4 5v6m-3-3h6"/></svg></button><button aria-label="Workspace settings and information" title="Workspace settings and information" @click="workspaceInfo=!workspaceInfo" :aria-expanded="workspaceInfo"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="8"/><path d="M12 11v6m0-10v1"/></svg></button><button v-if="data?.profile&&!monitoring" class="comm-rail-profile" aria-label="Edit your profile" title="Your profile" @click="modal='profile'"><img v-if="data.profile.avatar_url" :src="data.profile.avatar_url" alt=""><span v-else>{{data.profile.name.slice(0,1)}}</span></button></div>
  </nav>
+ <div v-if="connectionState!=='connected'" class="comm-connection-status" role="status">{{connectionState==='connecting'?'Connecting to live updates�':'Live updates disconnected � reconnecting�'}}</div>
  <div class="comm-workspace-controls" v-if="workspaceInfo">
  <div class="comm-title"><div><span class="comm-brand-icon">C</span><div><h1>Communication</h1><p>Your chats. Your communities.</p></div></div><a href="/products/communication?manage=overview" v-if="data?.admin">Communication overview &rarr;</a><a href="/products" v-else>All products &rarr;</a></div>
  <div class="comm-disclosure"><span>&#128274;</span> Company workspace &middot; Conversations and files are accessible to the Super Admin. Administrator reviews are logged.</div>

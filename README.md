@@ -91,3 +91,21 @@ The Status tab has a WhatsApp-style directory with author photos, My updates, Re
 Super Admin opens /products/communication for the product overview: chats, Communication users, companies and communities, invitations, status and announcements, conversation review, and review logs. No Communication item is added to the portal sidebar. The product introduction page is retained. Start Communication opens the management overview for Super Admin and /communication chats for employees. Delegated admins keep their company-scoped onboarding tools in chat.
 
 Website Administration manages shared employee accounts and other product permissions. Communication access and admin roles are managed within the product. Removing access there preserves the global employee account and other product permissions. A company is required when granting Communication access; global accounts without Communication can remain unassigned.
+
+### Live Communication (Laravel Reverb)
+
+Communication uses private WebSocket notifications instead of periodic chat or status API polling. After a change, authorized clients fetch their current scoped data. Messages, reactions, edits, pins, communities and status updates refresh on events; reconnect and returning to the tab synchronize missed changes. A local timer only controls status playback and expiry.
+
+Run these from the project directory in separate terminals:
+
+```powershell
+php artisan serve
+npm run dev
+php artisan reverb:start
+# If php is not on PATH:
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-reverb.ps1
+```
+
+Reverb needs no Pusher account or credentials. The pusher-js dependency implements the compatible wire protocol. Local Reverb credentials are generated in .env, which remains ignored by Git. For another machine, set a random REVERB_APP_SECRET, an application key and matching VITE_REVERB_APP_KEY. Restart Vite after changing VITE variables, and restart Reverb after server configuration changes.
+
+Production: keep Reverb running under a service supervisor, use a TLS reverse proxy for WebSockets, set REVERB_ALLOWED_ORIGINS to the site hostname, and configure REVERB_HOST/PORT/SCHEME plus matching VITE_REVERB variables for that host. REVERB_SERVER_HOST/PORT control the bind address. Broadcasting runs immediately; no queue worker is required for Communication updates. If Reverb is unavailable, message saves still succeed and clients show a reconnecting indicator.

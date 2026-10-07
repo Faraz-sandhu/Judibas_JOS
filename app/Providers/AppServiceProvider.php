@@ -13,6 +13,7 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        require base_path('routes/channels.php');
         RateLimiter::for('portal-login', function (Request $r) {
             return [
                 Limit::perMinute(5)->by('login:'.hash('sha256', strtolower((string) $r->input('email')).'|'.$r->ip())),

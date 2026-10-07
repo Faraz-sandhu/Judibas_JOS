@@ -1,0 +1,67 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Events\CommunicationChanged;
+use App\Models\User;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
+use Tests\TestCase;
+
+class CommunicationRealtimeTest extends TestCase
+{
+    use DatabaseTransactions;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->withoutVite();
+    }
+
+    private function employee(): User
+    {
+        $user = User::factory()->create(['is_active' => true]);
+        DB::table('user_product_access')->insert(['user_id' => $user->id, 'product_slug' => 'communication']);
+
+        return $user;
+    }
+
+    public function test_private_channels_require_active_communication_access_and_own_identity(): void
+    {
+        config(['broadcasting.default' => 'reverb']);
+        $data = ['socket_id' => '123.456', 'channel_name' => 'private-communication.user.super'];
+        $this->postJson('/broadcasting/auth', $data)->assertForbidden();
+        $user = $this->employee();
+        $this->actingAs($user)->postJson('/broadcasting/auth', $data)->assertForbidden();
+        $data['channel_name'] = 'private-communication.user.'.$user->id;
+        $this->postJson('/broadcasting/auth', $data)->assertOk()->assertJsonStructure(['auth']);
+        $data['channel_name'] = 'private-communication.user.'.($user->id + 100000);
+        $this->postJson('/broadcasting/auth', $data)->assertForbidden();
+        $user->forceFill(['is_active' => false])->save();
+        $data['channel_name'] = 'private-communication.user.'.$user->id;
+        $this->postJson('/broadcasting/auth', $data)->assertForbidden();
+    }
+
+    public function test_super_admin_session_authenticates_without_an_employee_account(): void
+    {
+        config(['broadcasting.default' => 'reverb']);
+        $this->withSession(['judibas_admin' => true])->postJson('/broadcasting/auth', ['socket_id' => '123.456', 'channel_name' => 'private-communication.user.super'])->assertOk()->assertJsonStructure(['auth']);
+        $this->postJson('/broadcasting/auth', ['socket_id' => '123.456', 'channel_name' => 'private-communication.user.1'])->assertForbidden();
+    }
+
+    public function test_chat_changes_notify_only_participants_and_do_not_broadcast_message_content(): void
+    {
+        Event::fake([CommunicationChanged::class]);
+        $a = $this->employee();
+        $b = $this->employee();
+        $outsider = $this->employee();
+        $id = DB::table('communication_conversations')->insertGetId(['kind' => 'group', 'name' => 'Realtime group', 'company_id' => $a->company_id, 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('communication_members')->insert([['conversation_id' => $id, 'user_id' => $a->id], ['conversation_id' => $id, 'user_id' => $b->id]]);
+        $this->actingAs($a)->postJson('/communication/api/conversations/'.$id.'/messages', ['body' => 'Private message'])->assertCreated();
+        Event::assertDispatched(CommunicationChanged::class, fn ($e) => in_array($a->id, $e->recipients) && in_array($b->id, $e->recipients) && ! in_array($outsider->id, $e->recipients) && $e->broadcastWith() === ['kind' => 'workspace', 'conversation_id' => $id]);
+        Event::fake([CommunicationChanged::class]);
+        $this->actingAs($outsider)->postJson('/communication/api/conversations/'.$id.'/messages', ['body' => 'Unauthorized'])->assertForbidden();
+        Event::assertNotDispatched(CommunicationChanged::class);
+    }
+}
