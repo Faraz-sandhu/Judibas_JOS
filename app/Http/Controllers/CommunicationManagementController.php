@@ -91,7 +91,7 @@ class CommunicationManagementController extends Controller
         abort_unless($g, 404);
         $paths = DB::table('communication_messages')->where('conversation_id', $id)->whereNotNull('attachment_path')->pluck('attachment_path')->all();
         DB::table('communication_conversations')->where('id', $id)->delete();
-        Storage::disk('local')->delete($paths);
+        \App\Services\CommunicationAttachmentStorage::delete($paths);
 
         return response()->json(['message' => 'Group deleted.']);
     }
@@ -109,7 +109,7 @@ class CommunicationManagementController extends Controller
                 foreach ($v['company_ids'] as $company) {
                     $cid = Access::community($company);
                     $file = $r->file('attachment');
-                    $path = $file ? $file->storeAs('communication', Str::uuid().'.'.$file->extension(), 'local') : null;
+                    $path = $file ? \App\Services\CommunicationAttachmentStorage::store($file, 'communication') : null;
                     if ($path) {
                         $paths[] = $path;
                     }
@@ -118,7 +118,7 @@ class CommunicationManagementController extends Controller
                 }
             });
         } catch (\Throwable $e) {
-            Storage::disk('local')->delete($paths);
+            \App\Services\CommunicationAttachmentStorage::delete($paths);
             throw $e;
         }
 

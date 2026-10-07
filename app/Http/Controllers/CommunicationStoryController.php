@@ -53,15 +53,16 @@ class CommunicationStoryController extends Controller
         $textStyle = $v['text_style'] ?? null;
         if ($textStyle !== null) { foreach (['bold', 'italic', 'underline'] as $flag) { if (isset($textStyle[$flag])) $textStyle[$flag] = filter_var($textStyle[$flag], FILTER_VALIDATE_BOOLEAN); } if (isset($textStyle['size'])) $textStyle['size'] = (int) $textStyle['size']; }
         $file = $r->file('attachment');
-        $path = $file ? $file->store('communication-stories', 'local') : null;
+        $path = $file ? \App\Services\CommunicationAttachmentStorage::store($file, 'communication-stories') : null;
         try {
             $id = DB::table('communication_stories')->insertGetId(['text_style' => $textStyle !== null ? json_encode($textStyle) : null, 'author_id' => Access::super($r) ? null : $r->user()->id, 'company_id' => Access::super($r) ? null : Access::company(), 'title' => $v['title'] ?? 'Status', 'body' => $v['body'] ?? '', 'attachment_path' => $path, 'attachment_name' => $file?->getClientOriginalName(), 'attachment_mime' => $file?->getMimeType(), 'expires_at' => now()->addDay(), 'created_at' => now(), 'updated_at' => now()]);
         } catch (\Throwable $e) {
             if ($path) {
-                Storage::disk('local')->delete($path);
+                \App\Services\CommunicationAttachmentStorage::delete($path);
             }throw $e;
         }
 
+        \App\Services\CommunicationAttachmentStorage::queue($path);
         return response()->json(['id' => $id], 201);
     }
 
@@ -69,9 +70,10 @@ class CommunicationStoryController extends Controller
     {
         Access::subject($r);
         $s = self::visible($r)->where('id', $id)->first();
-        abort_unless($s && $s->attachment_path && Storage::disk('local')->exists($s->attachment_path), 404);
+        abort_unless($s && $s->attachment_path && \App\Services\CommunicationAttachmentStorage::available($s->attachment_path), 404);
         $headers = ['Cache-Control' => 'private, no-store', 'X-Content-Type-Options' => 'nosniff'];
         if (! $r->boolean('download') && preg_match('~^(image|video|audio)/~', $s->attachment_mime ?? '')) {
+            if ($preview = \App\Services\CommunicationAttachmentStorage::preview($s->attachment_path, $r)) return $preview;
             return response()->file(Storage::disk('local')->path($s->attachment_path), $headers);
         }
 
@@ -108,7 +110,7 @@ class CommunicationStoryController extends Controller
         $s = DB::table('communication_stories')->where('id', $id)->first();
         abort_unless($s, 404);
         if ($s->attachment_path) {
-            Storage::disk('local')->delete($s->attachment_path);
+            \App\Services\CommunicationAttachmentStorage::delete($s->attachment_path);
         }
         DB::table('communication_stories')->where('id', $id)->delete();
 

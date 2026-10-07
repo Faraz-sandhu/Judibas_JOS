@@ -32,7 +32,7 @@ Artisan::command('communication:prune-stories', function () {
     DB::table('communication_stories')->where('expires_at', '<=', now())->orderBy('id')->chunkById(100, function ($stories) use (&$count) {
         foreach ($stories as $story) {
             if ($story->attachment_path) {
-                Storage::disk('local')->delete($story->attachment_path);
+                \App\Services\CommunicationAttachmentStorage::delete($story->attachment_path);
             }
             DB::table('communication_stories')->where('id', $story->id)->delete();
             $count++;
@@ -42,3 +42,25 @@ Artisan::command('communication:prune-stories', function () {
 })->purpose('Remove expired Communication stories and their private attachments');
 
 Schedule::command('communication:prune-stories')->hourly();
+
+Artisan::command('communication:sync-attachments', function () {
+    if (config('communication_attachments.disk') !== 'r2') { $this->error('Enable R2 in .env first.'); return 1; }
+    foreach (['communication_messages', 'communication_stories'] as $table) {
+        DB::table($table)->whereNotNull('attachment_path')->when($table === 'communication_messages', fn ($q) => $q->whereNull('deleted_at'))
+            ->when($table === 'communication_stories', fn ($q) => $q->where('expires_at', '>', now()))->orderBy('id')->chunkById(100, function ($rows) {
+                foreach ($rows as $row) \App\Services\CommunicationAttachmentStorage::queue($row->attachment_path);
+            });
+    }
+    $this->info('Existing attachments queued for cloud backup. Run the attachment queue worker.');
+});
+
+Artisan::command('communication:storage-check', function () {
+    $key = 'communication-check/'.\Illuminate\Support\Str::uuid();
+    try {
+        $disk = Storage::disk('r2');
+        $disk->put($key, 'Judibas private storage check');
+        if ($disk->get($key) !== 'Judibas private storage check') throw new \RuntimeException('Read verification failed');
+        $this->info('R2 write/read verified.');
+    } catch (\Throwable $e) { $this->error('R2 check failed. Verify credentials, bucket, endpoint and network.'); return 1; }
+    finally { try { Storage::disk('r2')->delete($key); } catch (\Throwable $e) {} }
+});

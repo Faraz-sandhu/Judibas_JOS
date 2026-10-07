@@ -101,7 +101,7 @@ class CommunicationActionsController extends Controller
         abort_unless($c->kind !== 'community' || Access::super($r), 403, 'Only Super Admin can post to communities.');
         $path = null;
         if ($m->attachment_path) {
-            abort_unless(Storage::disk('local')->exists($m->attachment_path), 404, 'The attachment is no longer available.');
+            abort_unless(\App\Services\CommunicationAttachmentStorage::available($m->attachment_path), 404, 'The attachment is no longer available.');
             $path = 'communication/'.Str::uuid().'.'.pathinfo($m->attachment_path, PATHINFO_EXTENSION);
             abort_unless(Storage::disk('local')->copy($m->attachment_path, $path), 500, 'Unable to copy this attachment.');
         }

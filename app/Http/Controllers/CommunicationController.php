@@ -268,7 +268,7 @@ class CommunicationController extends Controller
             abort_unless(DB::table('communication_messages')->where('id', $v['reply_to'])->where('conversation_id', $id)->whereNull('deleted_at')->exists(), 422);
         }
         $file = $r->file('attachment');
-        $path = $file ? $file->store('communication', 'local') : null;
+        $path = $file ? \App\Services\CommunicationAttachmentStorage::store($file, 'communication') : null;
         try {
             $message = DB::transaction(function () use ($r, $v, $id, $path, $file) {
                 $mid = DB::table('communication_messages')->insertGetId(['conversation_id' => $id, 'sender_id' => $this->isAdmin($r) ? null : Auth::id(), 'sender_name' => $this->isAdmin($r) ? 'Super Admin' : Auth::user()->name, 'body' => $v['body'] ?? null, 'reply_to' => $v['reply_to'] ?? null, 'attachment_path' => $path, 'attachment_name' => $file ? $file->getClientOriginalName() : null, 'created_at' => now(), 'updated_at' => now()]);
@@ -278,7 +278,7 @@ class CommunicationController extends Controller
             });
         } catch (\Throwable $e) {
             if ($path) {
-                Storage::disk('local')->delete($path);
+                \App\Services\CommunicationAttachmentStorage::delete($path);
             } throw $e;
         }
 
@@ -314,7 +314,7 @@ class CommunicationController extends Controller
         abort_unless($this->isAdmin($r), 403, 'Only Super Admin can delete messages.');
         DB::table('communication_messages')->where('id', $id)->update(['body' => null, 'deleted_at' => now(), 'updated_at' => now()]);
         if ($m->attachment_path) {
-            Storage::disk('local')->delete($m->attachment_path);
+            \App\Services\CommunicationAttachmentStorage::delete($m->attachment_path);
         }
 
         return response()->json(['message' => 'Message deleted.']);
@@ -323,13 +323,15 @@ class CommunicationController extends Controller
     public function attachment(Request $r, int $id)
     {
         $m = DB::table('communication_messages')->where('id', $id)->whereNull('deleted_at')->first();
-        abort_unless($m && $m->attachment_path && Storage::disk('local')->exists($m->attachment_path), 404);
+        abort_unless($m && $m->attachment_path, 404);
         $this->conversation($r, $m->conversation_id);
+        abort_unless(\App\Services\CommunicationAttachmentStorage::available($m->attachment_path), 404);
         if ($this->isAdmin($r)) {
             $this->audit($r, 'attachment_download', $m->conversation_id);
         }
 
         if ($r->boolean('inline') && in_array(Storage::disk('local')->mimeType($m->attachment_path), ['image/jpeg', 'image/png', 'image/webp'], true)) {
+            if ($preview = \App\Services\CommunicationAttachmentStorage::preview($m->attachment_path, $r)) return $preview;
             return response()->file(Storage::disk('local')->path($m->attachment_path), ['Cache-Control' => 'private, no-store', 'X-Content-Type-Options' => 'nosniff']);
         }
 

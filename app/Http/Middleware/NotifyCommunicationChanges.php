@@ -71,6 +71,7 @@ class NotifyCommunicationChanges
         if (! $message) {
             return;
         }
+        \App\Services\CommunicationAttachmentStorage::queue($message->attachment_path);
         $message->attachment_url = $message->attachment_path ? '/communication/api/attachments/'.$message->id : null;
         unset($message->attachment_path);
         $message->reactions = [];
