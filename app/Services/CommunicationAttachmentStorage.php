@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class CommunicationAttachmentStorage
@@ -14,7 +15,7 @@ class CommunicationAttachmentStorage
     public static function store(UploadedFile $file, string $directory): string
     {
         try {
-            $path = $file->store($directory, 'local');
+            $path = $file->storeAs($directory, Str::uuid().'.'.$file->extension(), 'local');
         } catch (\Throwable $e) {
             $path = false;
         }
