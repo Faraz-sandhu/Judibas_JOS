@@ -124,7 +124,7 @@ class CommunicationController extends Controller
     public function messages(Request $r, int $id)
     {
         $this->conversation($r, $id);
-        $v = $r->validate(['before' => 'nullable|integer|min:1', 'search' => 'nullable|string|max:200', 'around' => 'nullable|integer|min:1']);
+        $v = $r->validate(['before' => 'nullable|integer|min:1', 'after' => 'nullable|integer|min:1', 'open' => 'nullable|boolean', 'search' => 'nullable|string|max:200', 'around' => 'nullable|integer|min:1']);
         $q = DB::table('communication_messages')->where('conversation_id', $id);
         if (! empty($v['before'])) {
             $q->where('id', '<', $v['before']);
@@ -132,7 +132,22 @@ class CommunicationController extends Controller
         if (! empty($v['search'])) {
             $q->where('body', 'ilike', '%'.addcslashes($v['search'], '%_\\').'%');
         }
-        if (! empty($v['around'])) {
+        $firstUnread = null;
+        $subject = $this->subject($r);
+        if ($r->boolean('open') && $subject !== null) {
+            $readAt = DB::table('communication_members')->where('conversation_id', $id)->where('user_id', $subject)->value('read_at');
+            $unread = (clone $q)->whereNull('deleted_at')->where(fn ($q) => $q->where('sender_id', '!=', $subject)->orWhereNull('sender_id'));
+            if ($readAt) {
+                $unread->where('created_at', '>', $readAt);
+            }
+            $firstUnread = $unread->orderBy('id')->value('id');
+        }
+        if ($firstUnread) {
+            $messages = (clone $q)->where('id', '<', $firstUnread)->orderByDesc('id')->limit(10)->get()->reverse()->values()
+                ->concat((clone $q)->where('id', '>=', $firstUnread)->orderBy('id')->limit(50)->get());
+        } elseif (! empty($v['after'])) {
+            $messages = (clone $q)->where('id', '>', $v['after'])->orderBy('id')->limit(50)->get();
+        } elseif (! empty($v['around'])) {
             abort_unless(DB::table('communication_messages')->where('conversation_id', $id)->where('id', $v['around'])->exists(), 404);
             $messages = (clone $q)->where('id', '<=', $v['around'])->orderByDesc('id')->limit(25)->get()->reverse()->values()
                 ->concat((clone $q)->where('id', '>', $v['around'])->orderBy('id')->limit(25)->get());
@@ -163,7 +178,7 @@ class CommunicationController extends Controller
 
         $pinned = DB::table('communication_messages')->where('conversation_id', $id)->whereNull('deleted_at')->whereNotNull('pinned_at')->orderByDesc('pinned_at')->limit(3)->get(['id', 'body', 'sender_name', 'attachment_name', 'pinned_at']);
 
-        return response()->json(['messages' => $messages, 'pinned' => $pinned, 'has_more' => $messages->count() === 50]);
+        return response()->json(['messages' => $messages, 'pinned' => $pinned, 'first_unread_id' => $firstUnread, 'has_more' => $messages->isNotEmpty() && (clone $q)->where('id', '<', $messages->first()->id)->exists(), 'has_newer' => $messages->isNotEmpty() && (clone $q)->where('id', '>', $messages->last()->id)->exists(), 'next_after' => $messages->last()?->id]);
     }
 
     public function shared(Request $r, int $id)
@@ -317,6 +332,7 @@ class CommunicationController extends Controller
         if ($r->boolean('inline') && in_array(Storage::disk('local')->mimeType($m->attachment_path), ['image/jpeg', 'image/png', 'image/webp'], true)) {
             return response()->file(Storage::disk('local')->path($m->attachment_path), ['Cache-Control' => 'private, no-store', 'X-Content-Type-Options' => 'nosniff']);
         }
+
         return Storage::disk('local')->download($m->attachment_path, $m->attachment_name, ['X-Content-Type-Options' => 'nosniff']);
     }
 
