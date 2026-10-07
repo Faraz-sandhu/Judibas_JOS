@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import {ref,computed,watch,onBeforeUnmount} from 'vue';
+import ConversationAvatar from './ConversationAvatar.vue';
 type Member={id:number;name:string;email:string;company_name:string|null};
 type Item={id:number;sender_name:string;body?:string|null;created_at:string;attachment_name?:string|null;attachment_url?:string|null;links?:string[]};
-const props=defineProps<{conversation:{id:number;name:string;kind:string;company_name?:string};viewer:number|null;mode:string;request:(path:string,method?:string,body?:any,extra?:Record<string,string>)=>Promise<any>;reviewUser?:string;avatar?:(id:number|null|undefined)=>string|null}>();
+const props=defineProps<{conversation:{id:number;name:string;kind:string;company_name?:string};viewer:number|null;mode:string;request:(path:string,method?:string,body?:any,extra?:Record<string,string>)=>Promise<any>;reviewUser?:string;adminReview?:boolean;avatar?:(id:number|null|undefined)=>string|null}>();
 const emit=defineEmits<{close:[];jump:[id:number]}>();
 const tab=ref('info'),items=ref<Item[]>([]),members=ref<Member[]>([]),company=ref<string|null>(null),query=ref(''),busy=ref(false),error=ref(''),more=ref(false),cursor=ref<number|null>(null);
 let version=0,debounce:ReturnType<typeof setTimeout>|undefined;
-const title=computed(()=>tab.value==='search'?'Search messages':props.conversation.kind==='direct'?'Contact info':props.conversation.kind==='community'?'Community info':'Group info');
-const profile=computed(()=>props.conversation.kind==='direct'?members.value.filter(m=>m.id!==props.viewer):members.value);
+const title=computed(()=>tab.value==='search'?'Search messages':props.conversation.kind==='direct'?(props.adminReview?'Conversation info':'Contact info'):props.conversation.kind==='community'?'Community info':'Group info');
+const profile=computed(()=>props.conversation.kind==='direct'&&!props.adminReview?members.value.filter(m=>m.id!==props.viewer):members.value);
 const results=computed(()=>items.value.filter(i=>tab.value!=='links'||i.links?.length));
 function attachment(item:Item){return item.attachment_url+(props.reviewUser?'?view_user='+props.reviewUser:'');}
 async function fetchItems(older=false){
@@ -37,9 +38,9 @@ onBeforeUnmount(()=>{version++;if(debounce)clearTimeout(debounce);});
 <nav class="comm-detail-tabs" aria-label="Chat detail sections"><button v-for="value in ['info','media','docs','links','search']" :key="value" :class="{selected:tab===value}" @click="select(value)">{{value==='info'?'Info':value==='docs'?'Docs':value.charAt(0).toUpperCase()+value.slice(1)}}</button></nav>
 <div class="comm-detail-content">
 <template v-if="tab==='info'">
-<div class="comm-profile-card"><span class="comm-profile-avatar"><img v-if="conversation.kind==='direct'&&profile[0]&&avatar?.(profile[0].id)" :src="avatar(profile[0].id)!" alt=""><template v-else>{{conversation.name.slice(0,1).toUpperCase()}}</template></span><h3>{{conversation.name}}</h3><p>{{conversation.kind==='direct'?'Company contact':conversation.kind==='community'?'Company announcements':members.length+' members'}}</p><small v-if="company">{{company}}</small></div>
+<div class="comm-profile-card"><ConversationAvatar :kind="conversation.kind" :name="conversation.name" :members="profile" :viewer="viewer" :review="adminReview" :avatar="avatar" large/><h3>{{adminReview&&conversation.kind==='direct'?profile.map(p=>p.name).join(' & ')||conversation.name:conversation.name}}</h3><p>{{conversation.kind==='direct'?(adminReview?'Personal conversation':'Company contact'):conversation.kind==='community'?'Company announcements':members.length+' members'}}</p><small v-if="company">{{company}}</small></div>
 <div class="comm-profile-section" v-if="conversation.kind==='community'"><h3>About this community</h3><p>Company announcements from Super Admin. Members can react to updates.</p></div>
-<div class="comm-profile-section" v-if="profile.length"><h3>{{conversation.kind==='direct'?'Contact details':'Members'}}</h3><div class="comm-member-card" v-for="m in profile" :key="m.id"><span class="comm-mini-avatar"><img v-if="avatar?.(m.id)" :src="avatar(m.id)!" alt=""><template v-else>{{m.name.slice(0,1)}}</template></span><div><strong>{{m.name}}<small v-if="m.id===viewer"> (you)</small></strong><a :href="'mailto:'+m.email">{{m.email}}</a><small v-if="m.company_name">{{m.company_name}}</small></div></div></div>
+<div class="comm-profile-section" v-if="profile.length"><h3>{{conversation.kind==='direct'?(adminReview?'Participants':'Contact details'):'Members'}}</h3><div class="comm-member-card" v-for="m in profile" :key="m.id"><span class="comm-mini-avatar"><img v-if="avatar?.(m.id)" :src="avatar(m.id)!" alt=""><template v-else>{{m.name.slice(0,1)}}</template></span><div><strong>{{m.name}}<small v-if="!adminReview&&m.id===viewer"> (you)</small></strong><a :href="'mailto:'+m.email">{{m.email}}</a><small v-if="m.company_name">{{m.company_name}}</small></div></div></div>
 <button class="comm-shared-shortcut" @click="select('media')"><span>Media, links and documents</span><span>&rsaquo;</span></button>
 <div class="comm-media-grid" v-if="items.length"><a v-for="item in items.slice(0,6)" :key="item.id" :href="attachment(item)" :title="item.attachment_name||'Shared image'"><img :src="attachment(item)" :alt="item.attachment_name||'Shared image'" loading="lazy"></a></div>
 <button class="comm-search-shortcut" @click="select('search')">Search this conversation</button>
