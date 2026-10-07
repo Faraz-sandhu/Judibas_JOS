@@ -64,3 +64,5 @@ Artisan::command('communication:storage-check', function () {
     } catch (\Throwable $e) { $this->error('R2 check failed. Verify credentials, bucket, endpoint and network.'); return 1; }
     finally { try { Storage::disk('r2')->delete($key); } catch (\Throwable $e) {} }
 });
+
+Schedule::call(fn()=>\App\Http\Controllers\CommunicationCallController::expire())->everyMinute();

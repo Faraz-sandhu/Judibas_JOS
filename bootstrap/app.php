@@ -12,6 +12,7 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
+        $middleware->trimStrings(except: ['offer.sdp', 'answer.sdp']);
         $middleware->web(append: [NotifyCommunicationChanges::class]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

@@ -14,7 +14,7 @@ class NotifyCommunicationChanges
     public function handle(Request $r, Closure $next)
     {
         $path = $r->path();
-        $notify = $r->is('communication/api*') && in_array($r->method(), ['POST', 'PATCH', 'DELETE']) && ! $r->is('communication/api/review', 'communication/api/stories/*/view');
+        $notify = $r->is('communication/api*') && in_array($r->method(), ['POST', 'PATCH', 'DELETE']) && ! $r->is('communication/api/review', 'communication/api/stories/*/view', 'communication/api/calls', 'communication/api/calls/*');
         $conversation = null;
         $company = null;
         if ($notify && preg_match('~communication/api/(conversations|groups)/(\d+)~', $path, $m)) {

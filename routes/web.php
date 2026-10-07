@@ -82,3 +82,11 @@ Route::post('/broadcasting/auth', function (Request $r) {
 
     return Broadcast::connection('reverb')->auth($r);
 });
+
+Route::prefix('/communication/api/calls')->group(function () {
+ $controller=\App\Http\Controllers\CommunicationCallController::class;
+ Route::get('/',[$controller,'index']);Route::get('/state',[$controller,'state']);Route::get('/ice',[$controller,'ice'])->middleware('throttle:30,1');
+ Route::post('/',[$controller,'store'])->middleware('throttle:10,1');
+ Route::post('/{id}/signal',[$controller,'signal'])->whereUuid('id')->middleware('throttle:240,1');
+ Route::post('/{id}/finish',[$controller,'finish'])->whereUuid('id');
+});

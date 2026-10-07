@@ -104,7 +104,7 @@ class CommunicationController extends Controller
             $companies->where('id', Access::company($user));
         }
 
-        return response()->json(['conversations' => $conversations, 'companies' => $companies->get(), 'teams' => [], 'people' => $people->orderBy('name')->get(['id', 'name', 'email', 'company_id', 'profile_photo_path']),
+        return response()->json(['calling_enabled' => (bool) config('communication_calls.enabled') && ! $this->isAdmin($r) && ! $r->filled('view_user'), 'conversations' => $conversations, 'companies' => $companies->get(), 'teams' => [], 'people' => $people->orderBy('name')->get(['id', 'name', 'email', 'company_id', 'profile_photo_path']),
             'review_people' => $this->isAdmin($r) ? User::orderBy('name')->get(['id', 'name', 'email']) : [],
             'stories' => CommunicationStoryController::listing($r),
             'admin' => $this->isAdmin($r), 'manager' => Access::manager($r), 'company_id' => Access::company($user), 'user_id' => Auth::id(), 'profile' => ! $this->isAdmin($r) && Auth::check() ? Auth::user()->only(['id', 'name', 'email', 'avatar_url']) : null,
