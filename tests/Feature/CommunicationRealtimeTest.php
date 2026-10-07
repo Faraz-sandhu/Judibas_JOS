@@ -50,7 +50,7 @@ class CommunicationRealtimeTest extends TestCase
         $this->postJson('/broadcasting/auth', ['socket_id' => '123.456', 'channel_name' => 'private-communication.user.1'])->assertForbidden();
     }
 
-    public function test_chat_changes_notify_only_participants_and_do_not_broadcast_message_content(): void
+    public function test_new_messages_are_delivered_only_to_active_participants_without_storage_paths(): void
     {
         Event::fake([CommunicationChanged::class]);
         $a = $this->employee();
@@ -59,9 +59,33 @@ class CommunicationRealtimeTest extends TestCase
         $id = DB::table('communication_conversations')->insertGetId(['kind' => 'group', 'name' => 'Realtime group', 'company_id' => $a->company_id, 'created_at' => now(), 'updated_at' => now()]);
         DB::table('communication_members')->insert([['conversation_id' => $id, 'user_id' => $a->id], ['conversation_id' => $id, 'user_id' => $b->id]]);
         $this->actingAs($a)->postJson('/communication/api/conversations/'.$id.'/messages', ['body' => 'Private message'])->assertCreated();
-        Event::assertDispatched(CommunicationChanged::class, fn ($e) => in_array($a->id, $e->recipients) && in_array($b->id, $e->recipients) && ! in_array($outsider->id, $e->recipients) && $e->broadcastWith() === ['kind' => 'workspace', 'conversation_id' => $id]);
+        Event::assertDispatched(CommunicationChanged::class, fn ($e) => in_array($a->id, $e->recipients) && in_array($b->id, $e->recipients) && ! in_array($outsider->id, $e->recipients) && $e->broadcastWith()['message']['body'] === 'Private message' && ! array_key_exists('attachment_path', $e->broadcastWith()['message']) && $e->conversationId === $id);
         Event::fake([CommunicationChanged::class]);
         $this->actingAs($outsider)->postJson('/communication/api/conversations/'.$id.'/messages', ['body' => 'Unauthorized'])->assertForbidden();
         Event::assertNotDispatched(CommunicationChanged::class);
+    }
+
+    public function test_announcements_deliver_messages_only_to_selected_company(): void
+    {
+        Event::fake([CommunicationChanged::class]);
+        $a = $this->employee();
+        $b = $this->employee();
+        $other = DB::table('communication_companies')->insertGetId(['name' => 'Other realtime company', 'created_at' => now(), 'updated_at' => now()]);
+        $b->forceFill(['company_id' => $other])->save();
+        $this->withSession(['judibas_admin' => true])->postJson('/communication/api/announcements', ['company_ids' => [$a->company_id], 'body' => 'Company-only announcement'])->assertCreated();
+        Event::assertDispatched(CommunicationChanged::class, fn ($e) => $e->kind === 'message' && $e->message['body'] === 'Company-only announcement' && in_array($a->id, $e->recipients) && ! in_array($b->id, $e->recipients));
+        Event::assertDispatchedTimes(CommunicationChanged::class, 1);
+    }
+
+    public function test_revoked_accounts_are_excluded_from_direct_message_payloads(): void
+    {
+        Event::fake([CommunicationChanged::class]);
+        $a = $this->employee();
+        $revoked = $this->employee();
+        $id = DB::table('communication_conversations')->insertGetId(['kind' => 'group', 'name' => 'Revocation test', 'company_id' => $a->company_id, 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('communication_members')->insert([['conversation_id' => $id, 'user_id' => $a->id], ['conversation_id' => $id, 'user_id' => $revoked->id]]);
+        DB::table('user_product_access')->where('user_id', $revoked->id)->where('product_slug', 'communication')->delete();
+        $this->actingAs($a)->postJson('/communication/api/conversations/'.$id.'/messages', ['body' => 'Access-checked message'])->assertCreated();
+        Event::assertDispatched(CommunicationChanged::class, fn ($e) => in_array($a->id, $e->recipients) && ! in_array($revoked->id, $e->recipients));
     }
 }

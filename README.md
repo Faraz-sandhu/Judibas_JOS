@@ -94,7 +94,7 @@ Website Administration manages shared employee accounts and other product permis
 
 ### Live Communication (Laravel Reverb)
 
-Communication uses private WebSocket notifications instead of periodic chat or status API polling. After a change, authorized clients fetch their current scoped data. Messages, reactions, edits, pins, communities and status updates refresh on events; reconnect and returning to the tab synchronize missed changes. A local timer only controls status playback and expiry.
+Communication uses private WebSocket notifications instead of periodic chat or status API polling. New messages and announcements are delivered directly to currently authorized recipients and rendered immediately; storage paths are excluded. Other changes trigger a fetch of scoped data, and background refreshes reconcile unread state. Messages, reactions, edits, pins, communities and status updates refresh on events; reconnect and returning to the tab synchronize missed changes. A local timer only controls status playback and expiry.
 
 Run these from the project directory in separate terminals:
 

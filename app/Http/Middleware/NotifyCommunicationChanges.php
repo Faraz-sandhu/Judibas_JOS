@@ -35,6 +35,23 @@ class NotifyCommunicationChanges
             if ($r->is('communication/api/messages/*/forward')) {
                 $conversation = $r->integer('conversation_id');
             }
+            $messageIds = [];
+            if ($r->is('communication/api/announcements')) {
+                $messageIds = $response->getData()->ids ?? [];
+            } elseif ($r->method() === 'POST' && ($r->is('communication/api/conversations/*/messages') || $r->is('communication/api/messages/*/forward'))) {
+                $messageIds = [$response->getData()->id];
+            }
+            if ($messageIds) {
+                try {
+                    foreach ($messageIds as $messageId) {
+                        $this->publishMessage((int) $messageId);
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('Communication WebSocket delivery unavailable', ['exception' => get_class($e)]);
+                }
+
+                return $response;
+            }
             $recipients = $conversation ? array_unique([...$before, ...$this->members($conversation)]) : User::where('is_active', true)->whereIn('id', DB::table('user_product_access')->where('product_slug', 'communication')->select('user_id'))->when($company, fn ($q) => $q->where('company_id', $company))->pluck('id')->all();
             try {
                 foreach (array_chunk($recipients ?: [], 99) ?: [[]] as $chunk) {
@@ -46,6 +63,21 @@ class NotifyCommunicationChanges
         }
 
         return $response;
+    }
+
+    private function publishMessage(int $id): void
+    {
+        $message = DB::table('communication_messages')->where('id', $id)->first();
+        if (! $message) {
+            return;
+        }
+        $message->attachment_url = $message->attachment_path ? '/communication/api/attachments/'.$message->id : null;
+        unset($message->attachment_path);
+        $message->reactions = [];
+        $recipients = User::where('is_active', true)->whereIn('id', $this->members($message->conversation_id))->whereIn('id', DB::table('user_product_access')->where('product_slug', 'communication')->select('user_id'))->pluck('id')->all();
+        foreach (array_chunk($recipients, 99) ?: [[]] as $chunk) {
+            event(new CommunicationChanged($chunk, 'message', (int) $message->conversation_id, (array) $message));
+        }
     }
 
     private function members(int $id): array
