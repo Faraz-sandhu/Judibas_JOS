@@ -122,4 +122,55 @@ class CommunicationCallTest extends TestCase
         Http::fake(['rtc.live.cloudflare.com/*' => Http::response(['message' => 'private-server-secret'], 401)]);
         $this->actingAs($this->a)->getJson('/communication/api/calls/ice')->assertStatus(503)->assertJsonPath('message', 'Call relay unavailable. Check the Cloudflare TURN settings.')->assertDontSee('private-server-secret');
     }
+
+    public function test_missed_calls_are_counted_and_read_status_is_private_and_persistent(): void
+    {
+        $id = $this->start();
+        $this->postJson('/communication/api/calls/'.$id.'/finish', ['status' => 'cancelled'])->assertOk();
+        $this->actingAs($this->b)->getJson('/communication/api/calls')->assertOk()->assertJsonPath('missed_unread', 1);
+        $this->actingAs($this->outsider)->postJson('/communication/api/calls/read', ['ids' => [$id]])->assertOk();
+        $this->assertDatabaseHas('communication_calls', ['id' => $id, 'callee_read_at' => null]);
+        $this->actingAs($this->b)->postJson('/communication/api/calls/read', ['ids' => [$id]])->assertOk();
+        $this->getJson('/communication/api/calls')->assertOk()->assertJsonPath('missed_unread', 0)->assertJsonPath('calls.0.unread', false);
+        config(['communication_calls.enabled' => false]);
+        $this->postJson('/communication/api/calls/read', ['ids' => [$id]])->assertNotFound();
+    }
+
+    public function test_chat_call_records_are_filtered_and_nonmember_access_is_denied(): void
+    {
+        $id = $this->start();
+        $this->getJson('/communication/api/calls?conversation_id='.$this->chat)->assertOk()->assertJsonPath('calls.0.id', $id);
+        $this->actingAs($this->outsider)->getJson('/communication/api/calls?conversation_id='.$this->chat)->assertForbidden();
+    }
+
+    public function test_calling_busy_recipient_records_missed_attempt_without_interrupting_active_call(): void
+    {
+        $active = $this->start();
+        $otherChat = DB::table('communication_conversations')->insertGetId(['kind' => 'direct', 'name' => 'Busy Test', 'created_at' => now(), 'updated_at' => now()]);
+        foreach ([$this->b, $this->outsider] as $u) {
+            DB::table('communication_members')->insert(['conversation_id' => $otherChat, 'user_id' => $u->id]);
+        }
+        $response = $this->actingAs($this->outsider)->postJson('/communication/api/calls', ['conversation_id' => $otherChat, 'type' => 'audio', 'offer' => ['type' => 'offer', 'sdp' => 'offer']])->assertCreated()->assertJsonPath('call.status', 'busy');
+        $this->assertDatabaseHas('communication_calls', ['id' => $active, 'status' => 'ringing']);
+        $this->actingAs($this->b)->getJson('/communication/api/calls')->assertOk()->assertJsonPath('missed_unread', 1);
+        Event::assertDispatched(CommunicationCallSignal::class, fn ($e) => $e->recipient === $this->b->id && $e->payload['kind'] === 'finished' && $e->payload['call']['id'] === $response->json('call.id'));
+    }
+
+    public function test_expiry_broadcasts_missed_outcome_for_live_badges(): void
+    {
+        $id = $this->start();
+        $this->travel(61)->seconds();
+        $this->getJson('/communication/api/calls')->assertOk();
+        Event::assertDispatched(CommunicationCallSignal::class, fn ($e) => $e->recipient === $this->b->id && $e->payload['kind'] === 'finished' && $e->payload['call']['id'] === $id && $e->payload['call']['status'] === 'missed');
+    }
+
+    public function test_signaling_requests_do_not_consume_new_call_rate_limit(): void
+    {
+        $id = $this->start();
+        for ($i = 0; $i < 12; $i++) {
+            $this->postJson('/communication/api/calls/'.$id.'/signal', ['kind' => 'candidate', 'candidate' => ['candidate' => 'candidate'.$i]])->assertOk();
+        }
+        $this->postJson('/communication/api/calls/'.$id.'/finish', ['status' => 'cancelled'])->assertOk();
+        $this->postJson('/communication/api/calls', ['conversation_id' => $this->chat, 'type' => 'audio', 'offer' => ['type' => 'offer', 'sdp' => 'offer']])->assertCreated();
+    }
 }

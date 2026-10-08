@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AdminController;
 use App\Http\Controllers\CommunicationActionsController;
+use App\Http\Controllers\CommunicationCallController;
 use App\Http\Controllers\CommunicationController;
 use App\Http\Controllers\CommunicationManagementController;
 use App\Http\Controllers\CommunicationStoryController;
@@ -84,9 +85,12 @@ Route::post('/broadcasting/auth', function (Request $r) {
 });
 
 Route::prefix('/communication/api/calls')->group(function () {
- $controller=\App\Http\Controllers\CommunicationCallController::class;
- Route::get('/',[$controller,'index']);Route::get('/state',[$controller,'state']);Route::get('/ice',[$controller,'ice'])->middleware('throttle:30,1');
- Route::post('/',[$controller,'store'])->middleware('throttle:10,1');
- Route::post('/{id}/signal',[$controller,'signal'])->whereUuid('id')->middleware('throttle:240,1');
- Route::post('/{id}/finish',[$controller,'finish'])->whereUuid('id');
+    Route::post('/read', [CommunicationCallController::class, 'read']);
+    $controller = CommunicationCallController::class;
+    Route::get('/', [$controller, 'index']);
+    Route::get('/state', [$controller, 'state']);
+    Route::get('/ice', [$controller, 'ice'])->middleware('throttle:30,1,communication-call-ice:');
+    Route::post('/', [$controller, 'store'])->middleware('throttle:10,1,communication-call-start:');
+    Route::post('/{id}/signal', [$controller, 'signal'])->whereUuid('id')->middleware('throttle:240,1,communication-call-signal:');
+    Route::post('/{id}/finish', [$controller, 'finish'])->whereUuid('id');
 });

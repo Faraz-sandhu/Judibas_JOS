@@ -28,3 +28,17 @@ Current pricing: https://developers.cloudflare.com/realtime/sfu/platform/pricing
 Signaling uses private Reverb user channels; audio is sent by WebRTC, not Reverb or R2. Unanswered calls expire after 60 seconds. Busy users cannot receive a second call. While connected, a 25-second call-only heartbeat detects abandoned sessions; the scheduler closes stale calls after 90 seconds. This heartbeat does not poll chat/sidebar content. Closing or navigating away releases the microphone and attempts to end the call. Refreshing an active call ends that session; opening Communication can recover a still-ringing incoming call.
 
 Employees must keep Communication open to receive calls. Incoming ring sounds depend on browser autoplay permissions; the visual call prompt remains available. Call history stores metadata only, not audio, offers, answers or ICE candidates. If both Reverb/network connections fail, callers see a connection error; late packets cannot revive an ended call.
+
+## Diagnosing a silent call
+
+The call panel shows the local microphone meter, WebRTC connection state and whether incoming audio packets have arrived. Speak while unmuted: the meter should move. If it does not, check the selected microphone in Windows/browser settings. Press Test speaker to check the laptop's sound output, then Play call audio to retry browser playback. A connected call receiving audio with no sound usually needs the correct speaker/headphones selected or browser/tab sound unmuted.
+
+Reverb carries call signaling only. If Connecting audio remains visible, a successful port-8080 test does not prove WebRTC audio can connect: audio uses a separate peer connection. Restrictive networks/firewalls can require TURN; configure the credentials above for a reliable relay. Do not disable the entire firewall to test a call.
+
+## Calls sidebar and chat records
+
+Calls now opens a dedicated sidebar screen rather than a history dialog. Search by colleague name, filter missed calls, select a row for details, call back, or open the associated personal chat. History loads in pages of 30. Personal chats include chronological voice-call cards with direction, outcome and completed-call duration; older call records can be loaded separately.
+
+The Calls icon counts unread incoming missed, cancelled-before-answer and busy attempts. Counts persist across refreshes. Opening Calls marks the displayed missed records as read; older pages are marked when loaded. Call signals update records and badges through Reverb without a periodic history poll. Calls made to a busy recipient create a missed/busy record and leave their ongoing call intact. Outgoing ringing begins from the caller's click; incoming sound still depends on browser autoplay permissions, with an Enable ringtone control when needed.
+
+COMMUNICATION_CALLS_ENABLED=false hides the Calls sidebar, badges, chat call cards and all other calling controls and disables call APIs after config:clear and page refresh. Stored history remains available if calling is enabled again. Super Admin review cannot access employee calling APIs.
