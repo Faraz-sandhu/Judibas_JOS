@@ -44,4 +44,11 @@ class CommunicationOpeningTest extends TestCase
         DB::table('communication_members')->where('conversation_id', $id)->where('user_id', $user->id)->update(['read_at' => now()]);
         $this->actingAs($user)->getJson('/communication/api/conversations/'.$id.'/messages?open=1')->assertOk()->assertJsonPath('first_unread_id', null)->assertJsonPath('has_newer', false)->assertJsonCount(50, 'messages')->assertJsonPath('messages.49.id',$ids[144]);
     }
+    public function test_opening_bundles_private_call_history_only_when_enabled(): void
+    {
+        config(['communication_calls.enabled'=>true]);[$id,$user]=$this->conversation();$peer=DB::table('communication_members')->where('conversation_id',$id)->where('user_id','!=',$user->id)->value('user_id');$call=(string)\Illuminate\Support\Str::uuid();
+        DB::table('communication_calls')->insert(['id'=>$call,'conversation_id'=>$id,'caller_id'=>$peer,'callee_id'=>$user->id,'caller_seen_at'=>now(),'callee_seen_at'=>now(),'type'=>'audio','status'=>'ended','answered_at'=>now()->subMinute(),'ended_at'=>now(),'created_at'=>now()->subMinutes(2),'updated_at'=>now()]);
+        $this->actingAs($user)->getJson('/communication/api/conversations/'.$id.'/messages?open=1')->assertOk()->assertJsonPath('call_history.calls.0.id',$call)->assertJsonCount(60,'messages');
+        config(['communication_calls.enabled'=>false]);$this->getJson('/communication/api/conversations/'.$id.'/messages?open=1')->assertOk()->assertJsonPath('call_history',null);
+    }
 }

@@ -36,10 +36,10 @@ class CommunicationStoryController extends Controller
         $uid = Access::subject($r);
         $query = DB::table('communication_stories')->where('expires_at', '>', now());
         if ($uid !== null) {
-            $company = Access::company($uid);
-            $query->where(function ($q) use ($company) {
+            $companies = Access::companies($uid);
+            $query->where(function ($q) use ($companies) {
                 $q->whereNull('company_id');
-                if ($company !== null) $q->orWhere('company_id', $company);
+                if ($companies) $q->orWhereIn('company_id', $companies);
             });
         }
         return $query;

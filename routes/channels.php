@@ -12,3 +12,10 @@ Broadcast::connection('reverb')->channel('communication.user.{id}', function ($u
 
     return (string) $user->id === $id;
 });
+
+
+Broadcast::connection('reverb')->channel('communication.presence.{id}', function ($user, string $id) {
+ $r=request();CommunicationAccess::authorize($r);
+ if(!CommunicationAccess::super($r)&&!in_array((int)$id,CommunicationAccess::eligible((int)$user->id),true))return false;
+ return ['id'=>(string)$user->id];
+});

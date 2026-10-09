@@ -19,6 +19,7 @@ class AdminController extends Controller
     {
         $this->authorizeAdmin($r);
         $users = User::orderBy('name')->get(['id', 'name', 'email', 'is_active', 'company_id', 'communication_admin'])->map(function ($u) {
+            $u->company_ids = \App\Services\CommunicationAccess::companies($u->id);
             $u->product_slugs = DB::table('user_product_access')->where('user_id', $u->id)->pluck('product_slug');
 
             return $u;
@@ -46,7 +47,7 @@ class AdminController extends Controller
             if (is_string($email)) {
                 $r->merge(['email' => strtolower($email)]);
             }
-            $v = $r->validate(['company_id' => [Rule::requiredIf(fn () => in_array('communication', $r->input('product_slugs', []))), 'nullable', 'integer', 'exists:communication_companies,id'], 'communication_admin' => 'sometimes|boolean', 'name' => 'required|string|max:100', 'email' => ['required', 'email', 'max:200', Rule::unique('users', 'email')->ignore($id)], 'password' => [$id ? 'nullable' : 'required', 'string', 'min:12', 'max:200'], 'is_active' => 'required|boolean', 'product_slugs' => 'present|array', 'product_slugs.*' => ['string', Rule::in($slugs)]]);
+            $v = $r->validate(['company_ids'=>'sometimes|array|max:100','company_ids.*'=>'required|integer|distinct|exists:communication_companies,id','company_id' => [Rule::requiredIf(fn () => in_array('communication', $r->input('product_slugs', []))), 'nullable', 'integer', 'exists:communication_companies,id'], 'communication_admin' => 'sometimes|boolean', 'name' => 'required|string|max:100', 'email' => ['required', 'email', 'max:200', Rule::unique('users', 'email')->ignore($id)], 'password' => [$id ? 'nullable' : 'required', 'string', 'min:12', 'max:200'], 'is_active' => 'required|boolean', 'product_slugs' => 'present|array', 'product_slugs.*' => ['string', Rule::in($slugs)]]);
             abort_if(strtolower($v['email']) === strtolower((string) config('judibas.admin_email')), 422, 'This email is reserved for Super Admin.');
             abort_if(! empty($v['communication_admin']) && ! in_array('communication', $v['product_slugs']), 422, 'A Communication Admin needs Communication product access.');
             DB::transaction(function () use ($v, $id) {
@@ -54,13 +55,17 @@ class AdminController extends Controller
                 $u->name = $v['name'];
                 $u->email = strtolower($v['email']);
                 $u->is_active = $v['is_active'];
+                $oldCompany=$u->company_id;
                 $u->company_id = $v['company_id'] ?? $u->company_id;
                 $u->communication_admin = in_array('communication', $v['product_slugs']) && (bool) ($v['communication_admin'] ?? $u->communication_admin ?? false);
                 if (! empty($v['password'])) {
                     $u->password = $v['password'];
                 }$u->save();
+                if(array_key_exists('company_ids',$v)){DB::table('communication_company_memberships')->where('user_id',$u->id)->delete();foreach($v['company_ids'] as $company)DB::table('communication_company_memberships')->insert(['user_id'=>$u->id,'company_id'=>$company]);}
+                if(!array_key_exists('company_ids',$v) && $oldCompany && $oldCompany != $u->company_id) DB::table('communication_company_memberships')->where('user_id',$u->id)->where('company_id',$oldCompany)->delete();
+                if($u->company_id) DB::table('communication_company_memberships')->updateOrInsert(['user_id'=>$u->id,'company_id'=>$u->company_id],[]);
                 DB::table('user_product_access')->where('user_id', $u->id)->delete();
-                DB::table('communication_members')->where('user_id', $u->id)->whereIn('conversation_id', DB::table('communication_conversations')->where('kind', 'group')->where('company_id', '!=', $u->company_id)->select('id'))->delete();
+                DB::table('communication_members')->where('user_id', $u->id)->whereIn('conversation_id', DB::table('communication_conversations')->where('kind', 'group')->whereNotIn('company_id', \App\Services\CommunicationAccess::companies($u->id))->select('id'))->delete();
                 foreach (array_unique($v['product_slugs']) as $slug) {
                     DB::table('user_product_access')->insert(['user_id' => $u->id, 'product_slug' => $slug]);
                 }

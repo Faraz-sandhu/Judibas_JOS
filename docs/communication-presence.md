@@ -1,0 +1,3 @@
+# Communication availability
+
+Choose Online, Away, Do not disturb or Offline in Your profile. The preference is saved to the account and broadcasts through Reverb. Online automatically becomes Away when Communication is hidden/unfocused or idle for two minutes, and returns when active. Away and Do not disturb remain chosen while connected; Offline hides presence. Closing the final Communication tab shows Offline without changing the saved preference. Multiple tabs are aggregated. A lightweight 45-second activity heartbeat renews cache leases; it does not reload chats. Unexpected network disconnection uses Reverb disconnect timing. Do not disturb is a label and does not suppress calls or notifications. Publish stories only from Status.

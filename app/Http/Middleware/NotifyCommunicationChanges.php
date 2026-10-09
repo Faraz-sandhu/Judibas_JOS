@@ -14,7 +14,7 @@ class NotifyCommunicationChanges
     public function handle(Request $r, Closure $next)
     {
         $path = $r->path();
-        $notify = $r->is('communication/api*') && in_array($r->method(), ['POST', 'PATCH', 'DELETE']) && ! $r->is('communication/api/review', 'communication/api/stories/*/view', 'communication/api/calls', 'communication/api/calls/*');
+        $notify = $r->is('communication/api*') && in_array($r->method(), ['POST', 'PATCH', 'DELETE']) && ! $r->is('communication/api/presence', 'communication/api/review', 'communication/api/stories/*/view', 'communication/api/calls', 'communication/api/calls/*');
         $conversation = null;
         $company = null;
         if ($notify && preg_match('~communication/api/(conversations|groups)/(\d+)~', $path, $m)) {
@@ -52,7 +52,7 @@ class NotifyCommunicationChanges
 
                 return $response;
             }
-            $recipients = $conversation ? array_unique([...$before, ...$this->members($conversation)]) : User::where('is_active', true)->whereIn('id', DB::table('user_product_access')->where('product_slug', 'communication')->select('user_id'))->when($company, fn ($q) => $q->where('company_id', $company))->pluck('id')->all();
+            $recipients = $conversation ? array_unique([...$before, ...$this->members($conversation)]) : User::where('is_active', true)->whereIn('id', DB::table('user_product_access')->where('product_slug', 'communication')->select('user_id'))->when($company, fn ($q) => \App\Services\CommunicationAccess::usersInCompanies($q,[(int)$company]))->pluck('id')->all();
             try {
                 foreach (array_chunk($recipients ?: [], 99) ?: [[]] as $chunk) {
                     event(new CommunicationChanged($chunk, $r->is('communication/api/stories*') ? 'stories' : 'workspace', $conversation));
@@ -85,6 +85,7 @@ class NotifyCommunicationChanges
     {
         $company = DB::table('communication_conversations')->where('id', $id)->where('kind', 'community')->value('company_id');
 
-        return $company ? User::where('company_id', $company)->where('is_active', true)->pluck('id')->all() : DB::table('communication_members')->where('conversation_id', $id)->pluck('user_id')->all();
+        if($company){$q=User::where('is_active',true);\App\Services\CommunicationAccess::usersInCompanies($q,[(int)$company]);return $q->pluck('id')->all();}
+        return DB::table('communication_members')->where('conversation_id', $id)->pluck('user_id')->all();
     }
 }

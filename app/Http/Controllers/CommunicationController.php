@@ -101,10 +101,10 @@ class CommunicationController extends Controller
         }
         $companies = DB::table('communication_companies')->orderBy('name');
         if ($user !== null) {
-            $companies->where('id', Access::company($user));
+            $companies->whereIn('id', Access::companies($user));
         }
 
-        return response()->json(['calling_enabled' => (bool) config('communication_calls.enabled') && ! $this->isAdmin($r) && ! $r->filled('view_user'), 'conversations' => $conversations, 'companies' => $companies->get(), 'teams' => [], 'people' => $people->orderBy('name')->get(['id', 'name', 'email', 'company_id', 'profile_photo_path']),
+        return response()->json(['call_history_enabled' => (bool) config('communication_calls.enabled'), 'calling_enabled' => (bool) config('communication_calls.enabled') && ! $this->isAdmin($r) && ! $r->filled('view_user'), 'conversations' => $conversations, 'companies' => $companies->get(), 'teams' => [], 'people' => Access::attachCompanies($people->orderBy('name')->get(['id', 'name', 'email', 'company_id', 'profile_photo_path'])),
             'review_people' => $this->isAdmin($r) ? User::orderBy('name')->get(['id', 'name', 'email']) : [],
             'stories' => CommunicationStoryController::listing($r),
             'admin' => $this->isAdmin($r), 'manager' => Access::manager($r), 'company_id' => Access::company($user), 'user_id' => Auth::id(), 'profile' => ! $this->isAdmin($r) && Auth::check() ? Auth::user()->only(['id', 'name', 'email', 'avatar_url']) : null,
@@ -123,7 +123,7 @@ class CommunicationController extends Controller
 
     public function messages(Request $r, int $id)
     {
-        $this->conversation($r, $id);
+        $conversation = $this->conversation($r, $id);
         $v = $r->validate(['before' => 'nullable|integer|min:1', 'after' => 'nullable|integer|min:1', 'open' => 'nullable|boolean', 'search' => 'nullable|string|max:200', 'around' => 'nullable|integer|min:1']);
         $q = DB::table('communication_messages')->where('conversation_id', $id);
         if (! empty($v['before'])) {
@@ -178,7 +178,13 @@ class CommunicationController extends Controller
 
         $pinned = DB::table('communication_messages')->where('conversation_id', $id)->whereNull('deleted_at')->whereNotNull('pinned_at')->orderByDesc('pinned_at')->limit(3)->get(['id', 'body', 'sender_name', 'attachment_name', 'pinned_at']);
 
-        return response()->json(['messages' => $messages, 'pinned' => $pinned, 'first_unread_id' => $firstUnread, 'has_more' => $messages->isNotEmpty() && (clone $q)->where('id', '<', $messages->first()->id)->exists(), 'has_newer' => $messages->isNotEmpty() && (clone $q)->where('id', '>', $messages->last()->id)->exists(), 'next_after' => $messages->last()?->id]);
+        $callHistory = null;
+        if ($r->boolean('open') && $conversation->kind === 'direct' && config('communication_calls.enabled')) {
+            $callRequest = clone $r;
+            $callRequest->merge(['conversation_id' => $id, 'page' => 1]);
+            $callHistory = app(CommunicationCallController::class)->index($callRequest)->getData(true);
+        }
+        return response()->json(['call_history' => $callHistory, 'messages' => $messages, 'pinned' => $pinned, 'first_unread_id' => $firstUnread, 'has_more' => $messages->isNotEmpty() && (clone $q)->where('id', '<', $messages->first()->id)->exists(), 'has_newer' => $messages->isNotEmpty() && (clone $q)->where('id', '>', $messages->last()->id)->exists(), 'next_after' => $messages->last()?->id]);
     }
 
     public function shared(Request $r, int $id)
@@ -230,7 +236,7 @@ class CommunicationController extends Controller
         if ($v['kind'] === 'group') {
             abort_unless($company, 422, 'Every group must belong to a company.');
             if (! $admin) {
-                abort_unless((int) $company === Access::company(), 403);
+                abort_unless(in_array((int)$company,Access::companies(),true),403);
             }
         }
         $eligible = $admin ? null : Access::eligible((int) Auth::id());
@@ -262,7 +268,7 @@ class CommunicationController extends Controller
         $this->mutable($r);
         $c = $this->conversation($r, $id);
         abort_unless($c->kind !== 'community' || $this->isAdmin($r), 403, 'Only Super Admin can publish community announcements.');
-        $v = $r->validate(['body' => 'nullable|string|max:10000', 'reply_to' => 'nullable|integer', 'attachment' => 'nullable|file|max:10240|mimes:jpg,jpeg,png,webp,pdf,txt,csv,doc,docx,xls,xlsx,zip']);
+        $v = $r->validate(['body' => 'nullable|string|max:10000', 'reply_to' => 'nullable|integer', 'attachment' => 'nullable|file|max:10240|mimes:jpg,jpeg,png,webp,pdf,txt,csv,doc,docx,xls,xlsx,zip,webm,ogg,mp3,wav,m4a,mp4']);
         abort_unless(trim($v['body'] ?? '') !== '' || $r->hasFile('attachment'), 422, 'Enter a message or attach a file.');
         if (! empty($v['reply_to'])) {
             abort_unless(DB::table('communication_messages')->where('id', $v['reply_to'])->where('conversation_id', $id)->whereNull('deleted_at')->exists(), 422);
@@ -330,7 +336,7 @@ class CommunicationController extends Controller
             $this->audit($r, 'attachment_download', $m->conversation_id);
         }
 
-        if ($r->boolean('inline') && in_array(Storage::disk('local')->mimeType($m->attachment_path), ['image/jpeg', 'image/png', 'image/webp'], true)) {
+        if ($r->boolean('inline') && in_array(Storage::disk('local')->mimeType($m->attachment_path), ['image/jpeg', 'image/png', 'image/webp', 'audio/webm', 'video/webm', 'audio/ogg', 'video/ogg', 'application/ogg', 'audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/mp4', 'video/mp4', 'audio/x-m4a'], true)) {
             if ($preview = \App\Services\CommunicationAttachmentStorage::preview($m->attachment_path, $r)) return $preview;
             return response()->file(Storage::disk('local')->path($m->attachment_path), ['Cache-Control' => 'private, no-store', 'X-Content-Type-Options' => 'nosniff']);
         }

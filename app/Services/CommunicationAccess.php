@@ -27,6 +27,18 @@ class CommunicationAccess
         return $uid || Auth::id() ? DB::table('users')->where('id', $uid ?: Auth::id())->value('company_id') : null;
     }
 
+    public static function companies(?int $uid=null): array {
+        $uid ??= Auth::id();if(!$uid)return [];
+        return array_values(array_unique(array_map('intval',array_filter([self::company($uid),...DB::table('communication_company_memberships')->where('user_id',$uid)->pluck('company_id')->all()]))));
+    }
+    public static function attachCompanies($people) {
+        $memberships=DB::table('communication_company_memberships')->whereIn('user_id',$people->pluck('id'))->get()->groupBy('user_id');
+        foreach($people as $person){$person->company_ids=array_values(array_unique(array_map('intval',array_filter([$person->company_id,...($memberships->get($person->id)?->pluck('company_id')->all()??[])]))));}
+        return $people;
+    }
+    public static function usersInCompanies($query,array $ids): void {
+        $query->where(fn($q)=>$q->whereIn('company_id',$ids)->orWhereIn('id',DB::table('communication_company_memberships')->whereIn('company_id',$ids)->select('user_id')));
+    }
     public static function manager(Request $r): bool
     {
         return self::super($r) || (Auth::check() && Auth::user()->is_active && (bool) Auth::user()->communication_admin && DB::table('user_product_access')->where('user_id', Auth::id())->where('product_slug', 'communication')->exists());
@@ -35,18 +47,23 @@ class CommunicationAccess
     public static function manageCompany(Request $r, int $company): void
     {
         self::authorize($r);
-        abort_unless(self::super($r) || (self::manager($r) && self::company() === $company), 403, 'You can manage only your assigned company.');
+        abort_unless(self::super($r) || (self::manager($r) && in_array($company,self::companies(),true)), 403, 'You can manage only your assigned company.');
     }
 
     public static function eligible(int $uid): array
     {
-        $company = self::company($uid);
+        $key='communication.eligible.'.$uid;
+        if(request()->attributes->has($key))return request()->attributes->get($key);
+        $companies = self::companies($uid);
         $groups = DB::table('communication_members as m')->join('communication_conversations as c', 'c.id', '=', 'm.conversation_id')->where('m.user_id', $uid)->where('c.kind', 'group')->pluck('c.id');
         $peers = DB::table('communication_members')->whereIn('conversation_id', $groups)->pluck('user_id');
 
-        return User::where('is_active', true)->whereIn('id', DB::table('user_product_access')->where('product_slug', 'communication')->select('user_id'))->where(function ($q) use ($company, $peers) {
-            $q->where('company_id', $company)->orWhereIn('id', $peers);
+        $result = User::where('is_active', true)->whereIn('id', DB::table('user_product_access')->where('product_slug', 'communication')->select('user_id'))->where(function ($q) use ($companies, $peers) {
+            if($companies)self::usersInCompanies($q,$companies);else $q->whereNull('company_id');
+            $q->orWhereIn('id',$peers);
         })->pluck('id')->map(fn ($id) => (int) $id)->all();
+        request()->attributes->set($key,$result);
+        return $result;
     }
 
     public static function mutable(Request $r): void
@@ -85,7 +102,7 @@ return self::super($r) ? null : (int) Auth::id();
                     });
                 });
             })->orWhere(function ($q) use ($uid) {
-                $q->where('c.kind', 'community')->where('c.company_id', self::company($uid));
+                $q->where('c.kind', 'community')->whereIn('c.company_id', self::companies($uid));
             });
         });
     }

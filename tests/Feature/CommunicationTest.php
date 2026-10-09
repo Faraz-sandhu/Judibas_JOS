@@ -33,6 +33,25 @@ class CommunicationTest extends TestCase
         return $this->actingAs($a)->postJson('/communication/api/conversations', ['kind' => 'direct', 'member_ids' => [$b->id]])->assertOk()->json('id');
     }
 
+    public function test_voice_messages_are_private_playable_and_community_publishing_is_super_only(): void
+    {
+        config(['communication_attachments.disk'=>'local']);
+        $a=$this->employee(); $b=$this->employee(); $outsider=$this->employee();
+        $chat=$this->direct($a,$b);
+        $pcm=str_repeat("\0",16000);
+        $wav='RIFF'.pack('V',36+strlen($pcm)).'WAVEfmt '.pack('VvvVVvv',16,1,1,8000,16000,2,16).'data'.pack('V',strlen($pcm)).$pcm;
+        $file=fn()=>UploadedFile::fake()->createWithContent('voice-message.wav',$wav);
+        $mid=$this->post('/communication/api/conversations/'.$chat.'/messages',['attachment'=>$file()],['Accept'=>'application/json'])->assertCreated()->json('id');
+        $this->actingAs($b)->get('/communication/api/attachments/'.$mid.'?inline=1')->assertOk()->assertHeader('X-Content-Type-Options','nosniff');
+        $this->actingAs($outsider)->get('/communication/api/attachments/'.$mid.'?inline=1')->assertForbidden();
+        $company=DB::table('communication_companies')->insertGetId(['name'=>'Voice Test','created_at'=>now(),'updated_at'=>now()]);
+        DB::table('users')->where('id',$a->id)->update(['company_id'=>$company]);
+        $community=\App\Services\CommunicationAccess::community($company);
+        $this->actingAs($a->fresh())->post('/communication/api/conversations/'.$community.'/messages',['attachment'=>$file()],['Accept'=>'application/json'])->assertForbidden();
+        $this->withSession(['judibas_admin'=>true])->post('/communication/api/conversations/'.$community.'/messages',['attachment'=>$file()],['Accept'=>'application/json'])->assertCreated();
+        $this->withSession(['judibas_admin'=>true])->get('/communication/api/attachments/'.$mid.'?inline=1')->assertOk();
+    }
+
     public function test_shared_content_is_scoped_paginated_and_excludes_deleted_files(): void
     {
         $a = $this->employee();

@@ -55,11 +55,14 @@ class CommunicationCallController extends Controller
     {
         $names ??= User::whereIn('id', [$c->caller_id, $c->callee_id])->pluck('name', 'id')->all();
 
-        return ['id' => $c->id, 'conversation_id' => (int) $c->conversation_id, 'caller_id' => (int) $c->caller_id, 'callee_id' => (int) $c->callee_id, 'caller_name' => $names[$c->caller_id] ?? 'Employee', 'callee_name' => $names[$c->callee_id] ?? 'Employee', 'type' => $c->type, 'status' => $c->status, 'created_at' => $c->created_at, 'answered_at' => $c->answered_at, 'ended_at' => $c->ended_at, 'unread' => ! $c->callee_read_at && in_array($c->status, ['missed', 'cancelled', 'busy'])];
+        return ['id' => $c->id, 'conversation_id' => (int) $c->conversation_id, 'caller_id' => (int) $c->caller_id, 'callee_id' => (int) $c->callee_id, 'caller_name' => $names[$c->caller_id] ?? 'Employee', 'callee_name' => $names[$c->callee_id] ?? 'Employee', 'waiting' => $c->status === 'ringing' && DB::table('communication_calls')->where('id', '!=', $c->id)->whereIn('status', ['connecting', 'active'])->where(fn ($q) => $q->where('caller_id', $c->callee_id)->orWhere('callee_id', $c->callee_id))->exists(), 'type' => $c->type, 'status' => $c->status, 'created_at' => $c->created_at, 'answered_at' => $c->answered_at, 'ended_at' => $c->ended_at, 'unread' => ! $c->callee_read_at && in_array($c->status, ['missed', 'cancelled', 'busy'])];
     }
 
     private function notify($c, string $kind, array $data = []): void
     {
+        if (in_array($kind, ['incoming', 'connected', 'finished'])) {
+            try { event(new \App\Events\CommunicationChanged([], 'calls', (int) $c->conversation_id)); } catch (\Throwable $e) {}
+        }
         foreach ([$c->caller_id, $c->callee_id] as $uid) {
             event(new CommunicationCallSignal((int) $uid, ['kind' => $kind, 'call' => $this->dto($c)] + $data));
         }
@@ -67,15 +70,20 @@ class CommunicationCallController extends Controller
 
     public function index(Request $r)
     {
-        $uid = $this->actor($r);
+        abort_unless(config('communication_calls.enabled'), 404);
+        $uid = Access::subject($r);
+        $review = Access::super($r);
         self::expire();
         $r->validate(['page' => 'nullable|integer|min:1', 'conversation_id' => 'nullable|integer']);
         if ($r->filled('conversation_id')) {
             Access::conversation($r, $r->integer('conversation_id'));
         }
-        $q = DB::table('communication_calls')->where(fn ($q) => $q->where('caller_id', $uid)->orWhere('callee_id', $uid));
+        $q = DB::table('communication_calls')->when($uid !== null, fn ($q) => $q->where(fn ($q) => $q->where('caller_id', $uid)->orWhere('callee_id', $uid)));
+        if ($review) {
+            DB::table('communication_audits')->insert(['admin_email' => config('judibas.admin_email'), 'viewed_user_id' => $uid, 'conversation_id' => $r->filled('conversation_id') ? $r->integer('conversation_id') : null, 'action' => 'call_history_review', 'created_at' => now()]);
+        }
         $q->when($r->filled('conversation_id'), fn ($q) => $q->where('conversation_id', $r->integer('conversation_id')));
-        $unread = DB::table('communication_calls')->where('callee_id', $uid)->whereNull('callee_read_at')->whereIn('status', ['missed', 'cancelled', 'busy'])->count();
+        $unread = $review ? 0 : DB::table('communication_calls')->where('callee_id', $uid)->whereNull('callee_read_at')->whereIn('status', ['missed', 'cancelled', 'busy'])->count();
         $page = $q->orderByDesc('created_at')->orderByDesc('id')->paginate(30);
 
         $names = User::whereIn('id', collect($page->items())->flatMap(fn ($c) => [$c->caller_id, $c->callee_id])->unique())->pluck('name', 'id')->all();
@@ -103,9 +111,10 @@ class CommunicationCallController extends Controller
     {
         $uid = $this->actor($r);
         self::expire();
-        $c = DB::table('communication_calls')->whereIn('status', self::LIVE)->where(fn ($q) => $q->where('caller_id', $uid)->orWhere('callee_id', $uid))->first();
+        $c = DB::table('communication_calls')->whereIn('status', self::LIVE)->where(fn ($q) => $q->where('caller_id', $uid)->orWhere('callee_id', $uid))->orderByRaw("CASE WHEN status IN ('active', 'connecting') THEN 0 ELSE 1 END")->first();
 
-        return response()->json(['call' => $c ? $this->dto($c) : null, 'offer' => $c && $c->callee_id == $uid && $c->status === 'ringing' ? Cache::get('communication.call.offer.'.$c->id) : null])->header('Cache-Control', 'private, no-store');
+        $waiting = $c ? DB::table('communication_calls')->where('id', '!=', $c->id)->where('callee_id', $uid)->where('status', 'ringing')->first() : null;
+        return response()->json(['call' => $c ? $this->dto($c) : null, 'offer' => $c && $c->callee_id == $uid && $c->status === 'ringing' ? Cache::get('communication.call.offer.'.$c->id) : null, 'waiting' => $waiting ? ['call' => $this->dto($waiting), 'offer' => Cache::get('communication.call.offer.'.$waiting->id)] : null])->header('Cache-Control', 'private, no-store');
     }
 
     public function ice(Request $r)
@@ -142,7 +151,7 @@ class CommunicationCallController extends Controller
             User::whereIn('id', [$uid, $peer])->orderBy('id')->lockForUpdate()->get();
             $callerBusy = DB::table('communication_calls')->whereIn('status', self::LIVE)->where(fn ($q) => $q->where('caller_id', $uid)->orWhere('callee_id', $uid))->exists();
             abort_if($callerBusy, 409, 'You are already in a call.');
-            $busy = DB::table('communication_calls')->whereIn('status', self::LIVE)->where(fn ($q) => $q->where('caller_id', $peer)->orWhere('callee_id', $peer))->exists();
+            $busy = DB::table('communication_calls')->where('status', 'ringing')->where(fn ($q) => $q->where('caller_id', $peer)->orWhere('callee_id', $peer))->exists();
             $id = (string) Str::uuid();
             DB::table('communication_calls')->insert(['id' => $id, 'conversation_id' => $v['conversation_id'], 'caller_id' => $uid, 'callee_id' => $peer, 'type' => $v['type'], 'status' => $busy ? 'busy' : 'ringing', 'ended_at' => $busy ? now() : null, 'caller_seen_at' => now(), 'callee_seen_at' => now(), 'created_at' => now(), 'updated_at' => now()]);
 
@@ -178,8 +187,20 @@ class CommunicationCallController extends Controller
         abort_unless(in_array($c->status, self::LIVE), 409, 'This call has ended.');
         if ($kind === 'answer') {
             abort_unless($c->callee_id == $uid, 403);
-            $changed = DB::table('communication_calls')->where('id', $id)->where('status', 'ringing')->where('created_at', '>', now()->subSeconds(60))->update(['status' => 'connecting', 'caller_seen_at' => now(), 'callee_seen_at' => now(), 'updated_at' => now()]);
-            abort_unless($changed, 409, 'Call already answered or expired.');
+            $ended = DB::transaction(function () use ($c, $id, $uid) {
+                User::whereIn('id', [$c->caller_id, $uid])->orderBy('id')->lockForUpdate()->get();
+                $changed = DB::table('communication_calls')->where('id', $id)->where('status', 'ringing')->where('created_at', '>', now()->subSeconds(60))->update(['status' => 'connecting', 'caller_seen_at' => now(), 'callee_seen_at' => now(), 'updated_at' => now()]);
+                abort_unless($changed, 409, 'Call already answered or expired.');
+                $others = DB::table('communication_calls')->where('id', '!=', $id)->whereIn('status', self::LIVE)->where(fn ($q) => $q->where('caller_id', $uid)->orWhere('callee_id', $uid))->get();
+                foreach ($others as $other) {
+                    DB::table('communication_calls')->where('id', $other->id)->whereIn('status', self::LIVE)->update(['status' => $other->status === 'ringing' ? 'missed' : 'ended', 'ended_at' => now(), 'updated_at' => now()]);
+                    Cache::forget('communication.call.offer.'.$other->id);
+                }
+                return $others;
+            });
+            foreach ($ended as $other) {
+                try { $this->notify(DB::table('communication_calls')->where('id', $other->id)->first(), 'finished'); } catch (\Throwable $e) {}
+            }
             Cache::forget('communication.call.offer.'.$id);
         } elseif ($kind === 'connected') {
             DB::table('communication_calls')->where('id', $id)->where('status', 'connecting')->update(['status' => 'active', 'answered_at' => now(), 'updated_at' => now()]);

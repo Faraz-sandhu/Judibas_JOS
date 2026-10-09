@@ -94,3 +94,19 @@ Route::prefix('/communication/api/calls')->group(function () {
     Route::post('/{id}/signal', [$controller, 'signal'])->whereUuid('id')->middleware('throttle:240,1,communication-call-signal:');
     Route::post('/{id}/finish', [$controller, 'finish'])->whereUuid('id');
 });
+
+Route::get('/communication/api/presence', [\App\Http\Controllers\CommunicationPresenceController::class, 'index']);
+Route::post('/communication/api/presence', [\App\Http\Controllers\CommunicationPresenceController::class, 'update'])->middleware('throttle:30,1,communication-presence:');
+
+Route::post('/broadcasting/auth/batch', function (Request $r) {
+ CommunicationAccess::authorize($r);
+ $v=$r->validate(['socket_id'=>'required|string|max:100','channels'=>'required|array|min:1|max:100','channels.*'=>'required|string|max:200|distinct']);
+ if(CommunicationAccess::super($r))$r->setUserResolver(fn()=>new GenericUser(['id'=>'super']));
+ $results=[];
+ foreach($v['channels'] as $name){
+  $r->merge(['channel_name'=>$name]);
+  try{$results[$name]=['data'=>Broadcast::connection('reverb')->auth($r)];}
+  catch(\Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException $e){$results[$name]=['error'=>'Channel authorization denied'];}
+ }
+ return response()->json(['channels'=>$results])->header('Cache-Control','private, no-store');
+});

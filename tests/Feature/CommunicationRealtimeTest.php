@@ -43,6 +43,21 @@ class CommunicationRealtimeTest extends TestCase
         $this->postJson('/broadcasting/auth', $data)->assertForbidden();
     }
 
+    public function test_presence_updates_do_not_broadcast_workspace_refreshes(): void
+    {
+        Event::fake([CommunicationChanged::class,\App\Events\CommunicationPresence::class]);
+        $u=$this->employee();$this->actingAs($u)->postJson('/communication/api/presence',['tab'=>'10000000-1000-4000-8000-100000000099','activity'=>'online'])->assertOk();
+        Event::assertNotDispatched(CommunicationChanged::class);
+        Event::assertDispatched(\App\Events\CommunicationPresence::class);
+    }
+    public function test_batched_channel_auth_preserves_individual_authorization(): void
+    {
+        $u=$this->employee();$mine='private-communication.user.'.$u->id;$denied='private-communication.user.super';$presence='presence-communication.presence.'.$u->id;
+        $r=$this->actingAs($u)->postJson('/broadcasting/auth/batch',['socket_id'=>'123.456','channels'=>[$mine,$denied,$presence]])->assertOk()->json('channels');
+        $this->assertArrayHasKey('auth',$r[$mine]['data']);$this->assertArrayHasKey('auth',$r[$presence]['data']);$this->assertArrayHasKey('error',$r[$denied]);
+        $u->forceFill(['is_active'=>false])->save();$this->postJson('/broadcasting/auth/batch',['socket_id'=>'123.456','channels'=>[$mine]])->assertForbidden();
+    }
+
     public function test_super_admin_session_authenticates_without_an_employee_account(): void
     {
         config(['broadcasting.default' => 'reverb']);

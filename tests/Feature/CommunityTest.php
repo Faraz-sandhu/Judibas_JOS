@@ -161,4 +161,59 @@ class CommunityTest extends TestCase
         $this->assertTrue($u->communication_admin);
         $this->withSession(['judibas_admin' => false])->actingAs($u)->postJson('/admin/api/users',$v)->assertForbidden();
     }
+
+    public function test_invitation_joins_multiple_companies_with_one_account(): void
+    {
+        $one=$this->company('Multi One');$two=$this->company('Multi Two');$outside=$this->company('Multi Outside');
+        $peer=$this->member($two);$stranger=$this->member($outside);
+        $response=$this->super()->postJson('/communication/api/invitations',['email'=>'multi@example.test','company_ids'=>[$one,$two],'group_ids'=>[]])->assertCreated();
+        $path=parse_url($response->json('acceptance_url'),PHP_URL_PATH);
+        $this->withSession(['judibas_admin'=>false])->post($path,['name'=>'Multi Member','password'=>'multi-company-password','password_confirmation'=>'multi-company-password'])->assertRedirect('/communication');
+        $user=User::where('email','multi@example.test')->firstOrFail();
+        $this->assertEqualsCanonicalizing([$one,$two],Access::companies($user->id));
+        $this->assertDatabaseHas('communication_company_memberships',['user_id'=>$user->id,'company_id'=>$two]);
+        $this->actingAs($user)->getJson('/communication/api')->assertJsonCount(2,'companies');
+        $this->getJson('/communication/api/conversations/'.Access::community($two).'/messages')->assertOk();
+        $this->getJson('/communication/api/conversations/'.Access::community($outside).'/messages')->assertForbidden();
+        $this->postJson('/communication/api/conversations',['kind'=>'direct','member_ids'=>[$peer->id]])->assertOk();
+        $this->postJson('/communication/api/conversations',['kind'=>'direct','member_ids'=>[$stranger->id]])->assertForbidden();
+        Mail::assertSent(CommunicationInvitation::class);
+    }
+    public function test_manager_cannot_invite_outside_assigned_companies(): void
+    {
+        $one=$this->company('Manager Multi One');$two=$this->company('Manager Multi Two');$outside=$this->company('Manager Outside');
+        $manager=$this->member($one,true);
+        DB::table('communication_company_memberships')->insert(['user_id'=>$manager->id,'company_id'=>$two]);
+        $this->actingAs($manager)->postJson('/communication/api/invitations',['email'=>'allowed@example.test','company_ids'=>[$one,$two],'group_ids'=>[]])->assertCreated();
+        $this->postJson('/communication/api/invitations',['email'=>'denied@example.test','company_ids'=>[$one,$outside],'group_ids'=>[]])->assertForbidden();
+        $this->postJson('/communication/api/invitations',['email'=>'empty@example.test','company_ids'=>[],'group_ids'=>[]])->assertUnprocessable();
+        $this->postJson('/communication/api/invitations',['email'=>'duplicate@example.test','company_ids'=>[$one,$one],'group_ids'=>[]])->assertUnprocessable();
+    }
+    public function test_existing_user_accepts_extra_company_without_duplicate_account(): void
+    {
+        $one=$this->company('Existing One');$two=$this->company('Existing Two');
+        $user=$this->member($one);$user->password='existing-user-password';$user->save();
+        $response=$this->super()->postJson('/communication/api/invitations',['email'=>$user->email,'company_ids'=>[$two],'group_ids'=>[]])->assertCreated();
+        $path=parse_url($response->json('acceptance_url'),PHP_URL_PATH);
+        $this->withSession(['judibas_admin'=>false])->postJson($path,['password'=>'incorrect'])->assertUnprocessable();
+        $this->post($path,['password'=>'existing-user-password'])->assertRedirect('/communication');
+        $this->assertEqualsCanonicalizing([$one,$two],Access::companies($user->id));
+        $this->assertEquals(1,User::where('email',$user->email)->count());
+    }
+
+    public function test_super_admin_creates_and_updates_employee_company_memberships(): void
+    {
+        $one=$this->company('Employee One');$two=$this->company('Employee Two');
+        $payload=['name'=>'Multi Employee','email'=>'employee-multi@example.test','password'=>'employee-test-password','is_active'=>true,'company_ids'=>[$one,$two],'product_slugs'=>['communication'],'communication_admin'=>false];
+        $this->super()->postJson('/communication/api/users',$payload)->assertOk();
+        $user=User::where('email',$payload['email'])->firstOrFail();
+        $this->assertEqualsCanonicalizing([$one,$two],Access::companies($user->id));
+        $this->getJson('/communication/api/users')->assertJsonFragment(['company_ids'=>[$one,$two]]);
+        $payload['company_ids']=[$two];$payload['password']='';
+        $this->postJson('/communication/api/users/'.$user->id,$payload)->assertOk();
+        $this->assertSame([$two],Access::companies($user->id));
+        $payload['company_ids']=[];
+        $this->postJson('/communication/api/users/'.$user->id,$payload)->assertUnprocessable();
+        $this->withSession(['judibas_admin'=>false])->actingAs($user)->postJson('/communication/api/users',$payload)->assertForbidden();
+    }
 }

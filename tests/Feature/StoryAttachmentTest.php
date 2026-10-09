@@ -45,7 +45,8 @@ class StoryAttachmentTest extends TestCase
         $this->getJson("/communication/api/stories/$id/viewers")->assertForbidden();
         $this->actingAs($outsider)->get("/communication/api/stories/$id/attachment")->assertNotFound();
         $this->postJson("/communication/api/stories/$id/view")->assertNotFound();
-        $this->getJson('/communication/api')->assertJsonMissing(['title' => 'Status', 'author_id' => $manager->id]);
+        $stories=$this->getJson('/communication/api')->assertOk()->json('stories');
+        $this->assertFalse(collect($stories)->contains('id',$id));
         $this->actingAs($manager)->getJson("/communication/api/stories/$id/viewers")->assertJsonPath('total', 1);
         $manager->forceFill(['communication_admin' => false])->save();
         $this->postJson('/communication/api/stories', ['title' => 'Blocked', 'body' => 'No'])->assertForbidden();

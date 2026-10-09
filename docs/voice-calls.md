@@ -29,16 +29,20 @@ Signaling uses private Reverb user channels; audio is sent by WebRTC, not Reverb
 
 Employees must keep Communication open to receive calls. Incoming ring sounds depend on browser autoplay permissions; the visual call prompt remains available. Call history stores metadata only, not audio, offers, answers or ICE candidates. If both Reverb/network connections fail, callers see a connection error; late packets cannot revive an ended call.
 
-## Diagnosing a silent call
+## Automatic audio devices
 
-The call panel shows the local microphone meter, WebRTC connection state and whether incoming audio packets have arrived. Speak while unmuted: the meter should move. If it does not, check the selected microphone in Windows/browser settings. Press Test speaker to check the laptop's sound output, then Play call audio to retry browser playback. A connected call receiving audio with no sound usually needs the correct speaker/headphones selected or browser/tab sound unmuted.
+Calls automatically request the Windows Communications microphone and speaker, which is the working headset route on the local test laptops. Device preferences are kept in the current browser profile. If the saved microphone or speaker is unavailable, the app falls back to the system default. Browsers without output-selection support use the system output. Each laptop resolves its own devices; device IDs are not shared between employees or sent to the server.
 
-Reverb carries call signaling only. If Connecting audio remains visible, a successful port-8080 test does not prove WebRTC audio can connect: audio uses a separate peer connection. Restrictive networks/firewalls can require TURN; configure the credentials above for a reliable relay. Do not disable the entire firewall to test a call.
+The call screen shows the contact, call status/duration, accept/decline, mute/unmute, minimize and end controls. Device selectors, audio meters and diagnostic buttons have been removed. An Enable call audio button appears only if browser playback is blocked. If hardware routing changes, check Windows Sound settings and the default communications devices, plus browser sound permissions.
 
 ## Calls sidebar and chat records
 
 Calls now opens a dedicated sidebar screen rather than a history dialog. Search by colleague name, filter missed calls, select a row for details, call back, or open the associated personal chat. History loads in pages of 30. Personal chats include chronological voice-call cards with direction, outcome and completed-call duration; older call records can be loaded separately.
 
-The Calls icon counts unread incoming missed, cancelled-before-answer and busy attempts. Counts persist across refreshes. Opening Calls marks the displayed missed records as read; older pages are marked when loaded. Call signals update records and badges through Reverb without a periodic history poll. Calls made to a busy recipient create a missed/busy record and leave their ongoing call intact. Outgoing ringing begins from the caller's click; incoming sound still depends on browser autoplay permissions, with an Enable ringtone control when needed.
+The Calls icon counts unread incoming missed, cancelled-before-answer and busy attempts. Counts persist across refreshes. Opening Calls marks the displayed missed records as read; older pages are marked when loaded. Call signals update records and badges through Reverb without a periodic history poll. Calls made to a busy recipient create a missed/busy record and leave their ongoing call intact. Outgoing ringing begins from the caller's click; incoming sound still depends on browser autoplay permissions.
 
-COMMUNICATION_CALLS_ENABLED=false hides the Calls sidebar, badges, chat call cards and all other calling controls and disables call APIs after config:clear and page refresh. Stored history remains available if calling is enabled again. Super Admin review cannot access employee calling APIs.
+COMMUNICATION_CALLS_ENABLED=false hides the Calls sidebar, badges, chat call cards and all other calling controls and disables call APIs after config:clear and page refresh. Stored history remains available if calling is enabled again. Super Admin can review call metadata through the read-only history API; call signaling and mutation APIs remain employee-only.
+
+Super Admin can open Calls to review all employee call records, filter by the existing employee selector, and open the associated chat to see chronological call cards. Call-history views are audited. Admin review never marks an employee's missed calls as read and exposes no callback, microphone, live offer or ICE data. Metadata changes refresh the admin view through the existing private Super Admin workspace channel. The feature flag also hides and blocks admin call history when disabled.
+
+Call waiting: an active-call recipient receives a waiting call with Decline or End current & accept. The caller sees On another call in the call window. Accepting atomically ends the previous call; unanswered attempts expire into missed-call history. A recipient already ringing receives a busy record for additional attempts.
