@@ -99,6 +99,7 @@ class CommunicationActionsController extends Controller
         $v = $r->validate(['conversation_id' => 'required|integer']);
         $c = Access::conversation($r, $v['conversation_id']);
         abort_unless($c->kind !== 'community' || Access::super($r), 403, 'Only Super Admin can post to communities.');
+        \App\Services\CommunicationMessagePolicy::enforce($r, $m->body);
         $path = null;
         if ($m->attachment_path) {
             abort_unless(\App\Services\CommunicationAttachmentStorage::available($m->attachment_path), 404, 'The attachment is no longer available.');

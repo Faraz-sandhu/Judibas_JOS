@@ -110,3 +110,5 @@ Route::post('/broadcasting/auth/batch', function (Request $r) {
  }
  return response()->json(['channels'=>$results])->header('Cache-Control','private, no-store');
 });
+
+require __DIR__.'/pms.php';

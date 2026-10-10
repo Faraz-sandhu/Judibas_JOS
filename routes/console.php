@@ -66,3 +66,5 @@ Artisan::command('communication:storage-check', function () {
 });
 
 Schedule::call(fn()=>\App\Http\Controllers\CommunicationCallController::expire())->everyMinute();
+
+Schedule::command('pms:send-reminders')->dailyAt('09:00')->when(fn()=>config('pms.reminders_enabled',false))->withoutOverlapping();

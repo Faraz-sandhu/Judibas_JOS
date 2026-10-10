@@ -269,6 +269,7 @@ class CommunicationController extends Controller
         $c = $this->conversation($r, $id);
         abort_unless($c->kind !== 'community' || $this->isAdmin($r), 403, 'Only Super Admin can publish community announcements.');
         $v = $r->validate(['body' => 'nullable|string|max:10000', 'reply_to' => 'nullable|integer', 'attachment' => 'nullable|file|max:10240|mimes:jpg,jpeg,png,webp,pdf,txt,csv,doc,docx,xls,xlsx,zip,webm,ogg,mp3,wav,m4a,mp4']);
+        \App\Services\CommunicationMessagePolicy::enforce($r, $v['body'] ?? null);
         abort_unless(trim($v['body'] ?? '') !== '' || $r->hasFile('attachment'), 422, 'Enter a message or attach a file.');
         if (! empty($v['reply_to'])) {
             abort_unless(DB::table('communication_messages')->where('id', $v['reply_to'])->where('conversation_id', $id)->whereNull('deleted_at')->exists(), 422);
@@ -305,6 +306,7 @@ class CommunicationController extends Controller
         abort_unless($c->kind !== 'community' || $this->isAdmin($r), 403);
         abort_unless(! $m->deleted_at && ($this->isAdmin($r) ? $m->sender_id === null && $m->sender_name === 'Super Admin' : $m->sender_id === Auth::id()), 403);
         $v = $r->validate(['body' => 'required|string|max:10000']);
+        \App\Services\CommunicationMessagePolicy::enforce($r, $v['body']);
         abort_if(trim($v['body']) === '', 422);
         DB::table('communication_messages')->where('id', $id)->update(['body' => $v['body'], 'edited_at' => now(), 'updated_at' => now()]);
 
