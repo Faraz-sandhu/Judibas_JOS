@@ -7,9 +7,16 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schema;
 class PlatformSettings
 {
+    private static function tableExists(string $table):bool {
+        if(app()->runningUnitTests())return Schema::hasTable($table);
+        $key='platform.schema.'.hash('sha256',config('database.default').':'.config('database.connections.'.config('database.default').'.database').':'.$table);
+        if(cache()->get($key)===true)return true;
+        if(!Schema::hasTable($table))return false;
+        cache()->put($key,true,3600);return true;
+    }
     public static function apply(): void
     {
-        if (!Schema::hasTable('pms_realtime_settings')) return;
+        if (!self::tableExists('pms_realtime_settings')) return;
         $settings = RealtimeSetting::current();
         config(['broadcasting.default' => !$settings->enabled ? 'null' : ($settings->useReverb() ? 'reverb' : 'pusher')]);
         if (!$settings->useReverb()) config(['broadcasting.connections.pusher' => [
@@ -18,7 +25,7 @@ class PlatformSettings
             'client_options'=>['connect_timeout'=>1,'timeout'=>2],
         ]]);
         Broadcast::forgetDrivers();
-        if (Schema::hasTable('pms_mail_settings')) {
+        if (self::tableExists('pms_mail_settings')) {
             $mail = MailSetting::current();
             if ($mail->host && $mail->from_address) { $mail->applyToConfig(); Mail::purge('smtp'); }
         }

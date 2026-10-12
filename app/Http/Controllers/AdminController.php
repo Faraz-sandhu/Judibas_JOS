@@ -12,20 +12,25 @@ class AdminController extends Controller
 {
     private function authorizeAdmin(Request $r): void
     {
-        abort_unless($r->session()->get('judibas_admin'), 403);
+        \App\Services\PlatformAccess::requireAdmin($r);
     }
 
     public function data(Request $r)
     {
         $this->authorizeAdmin($r);
-        $users = User::orderBy('name')->get(['id', 'name', 'email', 'is_active', 'company_id', 'communication_admin'])->map(function ($u) {
+        $pmsUsers=\App\Modules\Pms\Models\User::withoutGlobalScopes()->with(['roles:id','departments:id'])->get()->keyBy('id');
+        $users = User::orderBy('name')->get(['id', 'name', 'email', 'is_active', 'judibas_administrator', 'company_id', 'communication_admin'])->map(function ($u) use ($pmsUsers) {
             $u->company_ids = \App\Services\CommunicationAccess::companies($u->id);
+            $pms=$pmsUsers[$u->id];
+            $u->pms_role_ids=$pms->roles->pluck('id');
+            $u->pms_department_ids=$pms->departments->pluck('id');
+            $u->designation=$pms->designation; $u->surname=$pms->surname;
             $u->product_slugs = DB::table('user_product_access')->where('user_id', $u->id)->pluck('product_slug');
 
             return $u;
         });
 
-        return response()->json(['blogs' => DB::table('blog_posts')->orderByDesc('id')->get(), 'pages' => PortalContent::pages(), 'products' => PortalContent::products(true), 'users' => $users, 'companies' => DB::table('communication_companies')->orderBy('name')->get(), 'announcement' => PortalContent::announcement()]);
+        return response()->json(['blogs' => DB::table('blog_posts')->orderByDesc('id')->get(), 'pages' => PortalContent::pages(), 'products' => PortalContent::products(true), 'users' => $users, 'companies' => DB::table('communication_companies')->orderBy('name')->get(), 'pms_roles'=>\App\Modules\Pms\Models\Role::orderBy('role_name')->get(['id','role_name','role_key']), 'pms_departments'=>\App\Modules\Pms\Models\Department::orderBy('dept_name')->get(['id','dept_name','status']), 'pms_tasks'=>DB::table('pms_tasks')->orderByDesc('id')->limit(200)->get(['id','title','project_id']), 'groups'=>DB::table('communication_conversations')->where('kind','group')->get(['id','name','company_id']), 'announcement' => PortalContent::announcement()]);
     }
 
     public function save(Request $r, string $resource, ?int $id = null)
@@ -43,32 +48,26 @@ class AdminController extends Controller
             $v = $r->validate(['slug' => ['required', Rule::in($slugs)], 'name' => 'required|string|max:100', 'description' => 'required|string|max:1000', 'icon' => 'nullable|string|max:16', 'color' => ['required', 'regex:/^#[a-fA-F0-9]{6}$/'], 'display_order' => 'required|integer|min:0|max:10000', 'visible' => 'required|boolean']);
             DB::table('product_settings')->updateOrInsert(['slug' => $v['slug']], $v + ['updated_at' => $now, 'created_at' => $now]);
         } elseif ($resource === 'users') {
+            \App\Services\PlatformAccess::protectAccount($r,$id);
+            if($r->has('judibas_administrator')&&!\App\Services\PlatformAccess::super($r))abort(403,'Only Super Admin can assign administrator privileges.');
             $email = $r->input('email');
             if (is_string($email)) {
                 $r->merge(['email' => strtolower($email)]);
             }
-            $v = $r->validate(['company_ids'=>'sometimes|array|max:100','company_ids.*'=>'required|integer|distinct|exists:communication_companies,id','company_id' => [Rule::requiredIf(fn () => in_array('communication', $r->input('product_slugs', []))), 'nullable', 'integer', 'exists:communication_companies,id'], 'communication_admin' => 'sometimes|boolean', 'name' => 'required|string|max:100', 'email' => ['required', 'email', 'max:200', Rule::unique('users', 'email')->ignore($id)], 'password' => [$id ? 'nullable' : 'required', 'string', 'min:12', 'max:200'], 'is_active' => 'required|boolean', 'product_slugs' => 'present|array', 'product_slugs.*' => ['string', Rule::in($slugs)]]);
+            $v = $r->validate(['judibas_administrator'=>'sometimes|boolean','pms_role_ids'=>'sometimes|array','pms_role_ids.*'=>'integer|distinct|exists:pms_roles,id','pms_department_ids'=>'sometimes|array','pms_department_ids.*'=>'integer|distinct|exists:pms_departments,id','surname'=>'sometimes|nullable|string|max:255','designation'=>'sometimes|nullable|string|max:255','company_ids'=>'sometimes|array|max:100','company_ids.*'=>'required|integer|distinct|exists:communication_companies,id','company_id' => [Rule::requiredIf(fn () => in_array('communication', $r->input('product_slugs', [])) && !$r->input('company_ids')), 'nullable', 'integer', 'exists:communication_companies,id'], 'communication_admin' => 'sometimes|boolean', 'name' => 'required|string|max:100', 'email' => ['required', 'email', 'max:200', Rule::unique('users', 'email')->ignore($id)], 'password' => [$id ? 'nullable' : 'required', 'string', 'min:12', 'max:200'], 'is_active' => 'required|boolean', 'product_slugs' => 'present|array', 'product_slugs.*' => ['string', Rule::in($slugs)]]);
             abort_if(strtolower($v['email']) === strtolower((string) config('judibas.admin_email')), 422, 'This email is reserved for Super Admin.');
             abort_if(! empty($v['communication_admin']) && ! in_array('communication', $v['product_slugs']), 422, 'A Communication Admin needs Communication product access.');
+            $v['company_ids']=$v['company_ids']??($id&&!array_key_exists('company_id',$v)?\App\Services\CommunicationAccess::companies($id):array_values(array_filter([$v['company_id']??null])));
+            if(empty($v['judibas_administrator'])&&in_array('projects',$v['product_slugs'])&&(!$id||!DB::table('user_product_access')->where('user_id',$id)->where('product_slug','projects')->exists())&&!count($v['pms_role_ids']??[])) throw \Illuminate\Validation\ValidationException::withMessages(['pms_role_ids'=>'Select a PMS role when granting PMS access.']);
+            if(!empty($v['judibas_administrator'])&&empty($v['pms_role_ids']))unset($v['pms_role_ids']);
+            \App\Services\UserProductAccess::validateSelection($v);
             DB::transaction(function () use ($v, $id) {
-                $u = $id ? User::findOrFail($id) : new User;
-                $u->name = $v['name'];
-                $u->email = strtolower($v['email']);
-                $u->is_active = $v['is_active'];
-                $oldCompany=$u->company_id;
-                $u->company_id = $v['company_id'] ?? $u->company_id;
-                $u->communication_admin = in_array('communication', $v['product_slugs']) && (bool) ($v['communication_admin'] ?? $u->communication_admin ?? false);
-                if (! empty($v['password'])) {
-                    $u->password = $v['password'];
-                }$u->save();
-                if(array_key_exists('company_ids',$v)){DB::table('communication_company_memberships')->where('user_id',$u->id)->delete();foreach($v['company_ids'] as $company)DB::table('communication_company_memberships')->insert(['user_id'=>$u->id,'company_id'=>$company]);}
-                if(!array_key_exists('company_ids',$v) && $oldCompany && $oldCompany != $u->company_id) DB::table('communication_company_memberships')->where('user_id',$u->id)->where('company_id',$oldCompany)->delete();
-                if($u->company_id) DB::table('communication_company_memberships')->updateOrInsert(['user_id'=>$u->id,'company_id'=>$u->company_id],[]);
-                DB::table('user_product_access')->where('user_id', $u->id)->delete();
-                DB::table('communication_members')->where('user_id', $u->id)->whereIn('conversation_id', DB::table('communication_conversations')->where('kind', 'group')->whereNotIn('company_id', \App\Services\CommunicationAccess::companies($u->id))->select('id'))->delete();
-                foreach (array_unique($v['product_slugs']) as $slug) {
-                    DB::table('user_product_access')->insert(['user_id' => $u->id, 'product_slug' => $slug]);
-                }
+                $u=$id?User::findOrFail($id):new User;
+                if(array_key_exists('judibas_administrator',$v))$u->judibas_administrator=$v['judibas_administrator'];
+                $u->name=$v['name'];$u->email=$v['email'];$u->is_active=$v['is_active'];$u->status=$v['is_active']?1:2;
+                foreach(['surname','designation'] as $key) if(array_key_exists($key,$v))$u->$key=$v[$key];
+                if(!empty($v['password']))$u->password=$v['password'];$u->save();
+                \App\Services\UserProductAccess::sync($u,$v);
             });
         } elseif ($resource === 'announcement') {
             $v = $r->validate(['title' => 'required|string|max:100', 'text' => 'required|string|max:250', 'url' => ['required', 'string', 'max:200', 'regex:/^\\/(?!\\/)[a-zA-Z0-9\\/#?=_-]*$/']]);
@@ -93,6 +92,7 @@ class AdminController extends Controller
     public function delete(Request $r, string $resource, int $id)
     {
         $this->authorizeAdmin($r);
+        if($resource==='users')\App\Services\PlatformAccess::protectAccount($r,$id);
         $table = match ($resource) {
             'blogs' => 'blog_posts','users' => 'users',default => null
         };

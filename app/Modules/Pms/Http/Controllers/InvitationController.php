@@ -40,11 +40,11 @@ class InvitationController extends Controller
     public function index()
     {
         $user = \App\Modules\Pms\Services\PmsAuth::user();
-        $sent = ($user->getAttribute('pms_super') ? Invitation::whereNull('sender_id') : $user->sentInvitations())->count();
-        $accepted = ($user->getAttribute('pms_super') ? Invitation::whereNull('sender_id') : $user->sentInvitations())->whereNotNull('accepted_at')->count();
-        $pending = ($user->getAttribute('pms_super') ? Invitation::whereNull('sender_id') : $user->sentInvitations())->pending()->count();
+        $sent = ($user->getAttribute('pms_super') ? Invitation::query() : $user->sentInvitations())->count();
+        $accepted = ($user->getAttribute('pms_super') ? Invitation::query() : $user->sentInvitations())->whereNotNull('accepted_at')->count();
+        $pending = ($user->getAttribute('pms_super') ? Invitation::query() : $user->sentInvitations())->pending()->count();
 
-        $canInviteEmployees = $user->can('employee-add') || $user->hasRole('admin');
+        $canInviteEmployees = (bool) request()->session()->get('judibas_admin');
         $roles = $canInviteEmployees
             ? Role::query()->orderBy('role_name')->get(['id', 'role_name', 'role_key'])
             : collect();
@@ -57,6 +57,7 @@ class InvitationController extends Controller
 
     public function inviteEmployee(Request $request)
     {
+        abort_unless(\App\Services\PlatformAccess::administrator($request),403,'Employee invitations are managed by Judibas Super Admin.');
         $sender = \App\Modules\Pms\Services\PmsAuth::user();
         abort_unless($sender->can('employee-add') || $sender->hasRole('admin'), 403, 'You do not have permission to invite employees.');
 
@@ -136,6 +137,7 @@ class InvitationController extends Controller
 
     public function inviteToTask(Request $request, Tasks $task)
     {
+        abort_unless(\App\Services\PlatformAccess::administrator($request),403,'New account invitations are managed by Judibas Super Admin.');
         $sender = \App\Modules\Pms\Services\PmsAuth::user();
         abort_unless(
             $sender->hasAnyPermission(['task-assign', 'my-work-manage-team']) ||
@@ -399,7 +401,7 @@ class InvitationController extends Controller
    public function sentList(Request $request)
 {
     $user = \App\Modules\Pms\Services\PmsAuth::user();
-    $invitations = ($user->getAttribute('pms_super') ? Invitation::whereNull('sender_id') : $user->sentInvitations())
+    $invitations = ($user->getAttribute('pms_super') ? Invitation::query() : $user->sentInvitations())
         ->with(['recipient', 'invitable', 'assignedRole', 'department', 'sender'])
         ->latest()
         ->get();

@@ -1,0 +1,5 @@
+<script setup lang="ts">
+import {ref,onMounted,onBeforeUnmount} from 'vue';const props=defineProps<{title:string;subtitle?:string;busy?:boolean}>();const emit=defineEmits(['close']);const dialog=ref<HTMLDialogElement|null>(null);const previous=document.activeElement as HTMLElement|null;
+function close(){if(!props.busy)emit('close');}function backdrop(e:MouseEvent){if(e.target!==dialog.value)return;const r=dialog.value!.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)close();}
+onMounted(()=>dialog.value?.showModal());onBeforeUnmount(()=>{dialog.value?.close();previous?.focus();});
+</script><template><Teleport to="body"><dialog ref="dialog" class="judibas-admin-dialog" :aria-label="title" @cancel.prevent="close" @click="backdrop"><header><div><h2>{{title}}</h2><p v-if="subtitle">{{subtitle}}</p></div><button type="button" aria-label="Close dialog" :disabled="busy" @click="close">&#215;</button></header><div class="admin-dialog-content"><slot/></div></dialog></Teleport></template>

@@ -82,7 +82,7 @@ class CommunicationActionsController extends Controller
     {
         $m = $this->message($r, $id);
         $c = Access::conversation($r, $m->conversation_id);
-        abort_unless($c->kind !== 'community' || Access::super($r), 403);
+        abort_unless($c->kind !== 'community' || \App\Services\PlatformAccess::administrator($r), 403);
         $v = $r->validate(['pinned' => 'required|boolean']);
         DB::transaction(function () use ($m, $v) {
             DB::table('communication_conversations')->where('id', $m->conversation_id)->lockForUpdate()->first();
@@ -98,7 +98,7 @@ class CommunicationActionsController extends Controller
         $m = $this->message($r, $id);
         $v = $r->validate(['conversation_id' => 'required|integer']);
         $c = Access::conversation($r, $v['conversation_id']);
-        abort_unless($c->kind !== 'community' || Access::super($r), 403, 'Only Super Admin can post to communities.');
+        abort_unless($c->kind !== 'community' || \App\Services\PlatformAccess::administrator($r), 403, 'Only Super Admin can post to communities.');
         \App\Services\CommunicationMessagePolicy::enforce($r, $m->body);
         $path = null;
         if ($m->attachment_path) {

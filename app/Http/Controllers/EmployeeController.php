@@ -34,13 +34,14 @@ class EmployeeController extends Controller
         Auth::login($u);
         $r->session()->regenerate();
 
-        return redirect(DB::table('user_product_access')->where('user_id', Auth::id())->where('product_slug', 'communication')->exists() ? '/communication' : '/');
+        if(\App\Services\PlatformAccess::administrator($r))return redirect()->intended('/admin');
+        return redirect()->intended(DB::table('user_product_access')->where('user_id', Auth::id())->where('product_slug', 'communication')->exists() ? '/communication' : '/');
     }
 
     public function workspace(Request $r, string $slug)
     {
         abort_unless(Auth::check() && Auth::user()->is_active, 403);
-        abort_unless(DB::table('user_product_access')->where('user_id', Auth::id())->where('product_slug', $slug)->exists(), 403);
+        abort_unless(($r->user()->is_active&&$r->user()->judibas_administrator)||DB::table('user_product_access')->where('user_id',Auth::id())->where('product_slug',$slug)->exists(),403);
 
         if ($slug === 'communication') {
             return redirect('/communication');

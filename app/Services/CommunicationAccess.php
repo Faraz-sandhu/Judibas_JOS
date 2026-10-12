@@ -16,7 +16,7 @@ class CommunicationAccess
 
     public static function authorize(Request $r): void
     {
-        if (self::super($r)) {
+        if (\App\Services\PlatformAccess::administrator($r)) {
             return;
         }
         abort_unless(Auth::check() && Auth::user()->is_active && DB::table('user_product_access')->where('user_id', Auth::id())->where('product_slug', 'communication')->exists(), 403, 'Communication access is required.');
@@ -41,19 +41,20 @@ class CommunicationAccess
     }
     public static function manager(Request $r): bool
     {
-        return self::super($r) || (Auth::check() && Auth::user()->is_active && (bool) Auth::user()->communication_admin && DB::table('user_product_access')->where('user_id', Auth::id())->where('product_slug', 'communication')->exists());
+        return \App\Services\PlatformAccess::administrator($r) || (Auth::check() && Auth::user()->is_active && (bool) Auth::user()->communication_admin && DB::table('user_product_access')->where('user_id', Auth::id())->where('product_slug', 'communication')->exists());
     }
 
     public static function manageCompany(Request $r, int $company): void
     {
         self::authorize($r);
-        abort_unless(self::super($r) || (self::manager($r) && in_array($company,self::companies(),true)), 403, 'You can manage only your assigned company.');
+        abort_unless(\App\Services\PlatformAccess::administrator($r) || (self::manager($r) && in_array($company,self::companies(),true)), 403, 'You can manage only your assigned company.');
     }
 
     public static function eligible(int $uid): array
     {
         $key='communication.eligible.'.$uid;
         if(request()->attributes->has($key))return request()->attributes->get($key);
+        if(User::where('id',$uid)->where('judibas_administrator',true)->where('is_active',true)->exists())return User::where('is_active',true)->where(fn($q)=>$q->where('judibas_administrator',true)->orWhereIn('id',DB::table('user_product_access')->where('product_slug','communication')->select('user_id')))->pluck('id')->map(fn($id)=>(int)$id)->all();
         $companies = self::companies($uid);
         $groups = DB::table('communication_members as m')->join('communication_conversations as c', 'c.id', '=', 'm.conversation_id')->where('m.user_id', $uid)->where('c.kind', 'group')->pluck('c.id');
         $peers = DB::table('communication_members')->whereIn('conversation_id', $groups)->pluck('user_id');
@@ -102,7 +103,7 @@ return self::super($r) ? null : (int) Auth::id();
                     });
                 });
             })->orWhere(function ($q) use ($uid) {
-                $q->where('c.kind', 'community')->whereIn('c.company_id', self::companies($uid));
+                $q->where('c.kind', 'community');if(!\App\Services\PlatformAccess::administrator(request()))$q->whereIn('c.company_id', self::companies($uid));
             });
         });
     }

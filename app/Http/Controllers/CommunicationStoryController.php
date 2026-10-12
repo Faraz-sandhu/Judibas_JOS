@@ -47,7 +47,7 @@ class CommunicationStoryController extends Controller
     public function store(Request $r)
     {
         Access::mutable($r);
-        abort_unless(Access::manager($r), 403); abort_unless(Access::super($r) || Access::company() !== null, 403, 'A company is required to publish stories.');
+        abort_unless(Access::manager($r), 403); abort_unless(\App\Services\PlatformAccess::administrator($r) || Access::company() !== null, 403, 'A company is required to publish stories.');
         $v = $r->validate(['text_style' => 'nullable|array:bold,italic,underline,color,background,font,size,align', 'text_style.bold' => 'sometimes|boolean', 'text_style.italic' => 'sometimes|boolean', 'text_style.underline' => 'sometimes|boolean', 'text_style.color' => ['sometimes', 'regex:/^#[0-9a-fA-F]{6}$/'], 'text_style.background' => ['sometimes', 'regex:/^#[0-9a-fA-F]{6}$/'], 'text_style.font' => 'sometimes|in:sans,serif,mono', 'text_style.size' => 'sometimes|integer|min:16|max:40', 'text_style.align' => 'sometimes|in:left,center,right', 'title' => 'nullable|string|max:100', 'body' => 'nullable|string|max:3000', 'attachment' => 'nullable|file|max:20480|mimes:jpg,jpeg,png,webp,mp4,webm,mp3,wav,m4a,pdf,txt,csv,doc,docx,xls,xlsx,zip']);
         abort_unless(trim($v['body'] ?? '') !== '' || $r->hasFile('attachment'), 422, 'Add story text or an attachment.');
         $textStyle = $v['text_style'] ?? null;
@@ -55,7 +55,7 @@ class CommunicationStoryController extends Controller
         $file = $r->file('attachment');
         $path = $file ? \App\Services\CommunicationAttachmentStorage::store($file, 'communication-stories') : null;
         try {
-            $id = DB::table('communication_stories')->insertGetId(['text_style' => $textStyle !== null ? json_encode($textStyle) : null, 'author_id' => Access::super($r) ? null : $r->user()->id, 'company_id' => Access::super($r) ? null : Access::company(), 'title' => $v['title'] ?? 'Status', 'body' => $v['body'] ?? '', 'attachment_path' => $path, 'attachment_name' => $file?->getClientOriginalName(), 'attachment_mime' => $file?->getMimeType(), 'expires_at' => now()->addDay(), 'created_at' => now(), 'updated_at' => now()]);
+            $id = DB::table('communication_stories')->insertGetId(['text_style' => $textStyle !== null ? json_encode($textStyle) : null, 'author_id' => Access::super($r) ? null : $r->user()->id, 'company_id' => \App\Services\PlatformAccess::administrator($r) ? null : Access::company(), 'title' => $v['title'] ?? 'Status', 'body' => $v['body'] ?? '', 'attachment_path' => $path, 'attachment_name' => $file?->getClientOriginalName(), 'attachment_mime' => $file?->getMimeType(), 'expires_at' => now()->addDay(), 'created_at' => now(), 'updated_at' => now()]);
         } catch (\Throwable $e) {
             if ($path) {
                 \App\Services\CommunicationAttachmentStorage::delete($path);

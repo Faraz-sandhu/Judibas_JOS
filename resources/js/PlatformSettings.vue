@@ -29,4 +29,4 @@ onMounted(load);
 <p class="muted">Cloudflare R2 stores attachments; Cloudflare TURN relays voice calls. Those credentials remain in .env and are separate from Reverb/Pusher live updates.</p>
 </template></div>
 </template>
-<style scoped>.platform-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.platform-settings select{width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:inherit}.platform-settings .button+.button{margin-left:10px}@media(max-width:700px){.platform-fields{grid-template-columns:1fr}}</style>
+<style scoped>.platform-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.platform-settings select{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:inherit}.platform-settings .button+.button{margin-left:10px}@media(max-width:700px){.platform-fields{grid-template-columns:1fr}}</style>

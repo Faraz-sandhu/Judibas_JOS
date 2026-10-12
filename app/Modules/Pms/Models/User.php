@@ -35,7 +35,7 @@ class User extends \App\Models\User
         'password' => 'hashed',
     ];
 
-    protected static function booted():void {static::addGlobalScope('pms_product',fn($query)=>$query->whereIn('users.id',\Illuminate\Support\Facades\DB::table('user_product_access')->where('product_slug','projects')->select('user_id')));}
+    protected static function booted():void {static::addGlobalScope('pms_product',fn($query)=>$query->where(fn($q)=>$q->whereIn('users.id',\Illuminate\Support\Facades\DB::table('user_product_access')->where('product_slug','projects')->select('user_id'))->orWhere(fn($a)=>$a->where('judibas_administrator',true)->where('is_active',true))));}
     public function notifications(){return $this->morphMany(DatabaseNotification::class,'notifiable')->latest();}
     public function can($abilities,$arguments=[]){foreach((array)$abilities as $ability){if(!\App\Modules\Pms\Services\PmsAccess::allows(request(),$ability))return false;}return true;}
     public function scopeActive(Builder $query): Builder

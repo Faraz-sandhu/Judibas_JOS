@@ -12,7 +12,7 @@ class PortalController extends Controller
 {
     public function index(Request $request, ?string $slug = null)
     {
-        if ($request->is('admin') && ! $request->session()->get('judibas_admin')) {
+        if ($request->is('admin') && ! \App\Services\PlatformAccess::administrator($request)) {
             return redirect('/login');
         }
         if ($request->is('login') && $request->session()->get('judibas_admin')) {
@@ -21,7 +21,15 @@ class PortalController extends Controller
         if ($request->is('login') && Auth::check()) {
             return redirect('/');
         }
+        if ($slug === 'communication' && $request->filled('manage') && \App\Services\PlatformAccess::administrator($request)) {
+            if ($request->query('manage') === 'overview') return redirect('/products/communication');
+            return redirect('/admin#'.match($request->query('manage')) {'users'=>'users','invitations'=>'invitations',default=>'communication'});
+        }
         $products = PortalContent::products();
+        if (Auth::check() && !\App\Services\PlatformAccess::administrator($request)) {
+            $allowed=Auth::user()->is_active?DB::table('user_product_access')->where('user_id',Auth::id())->pluck('product_slug')->all():[];
+            $products=array_values(array_filter($products,fn($p)=>in_array($p['slug'],$allowed,true)));
+        }
         $product = $slug ? collect($products)->firstWhere('slug', $slug) : null;
         if ($slug && ! $product) {
             abort(404);
@@ -41,13 +49,14 @@ class PortalController extends Controller
         return view('portal', ['portal' => [
             'name' => $settings['name'] ?? 'Judibas', 'tagline' => $settings['tagline'] ?? 'We build tools for the way our company works.', 'logo' => $logo,
             'logoIcon' => empty($settings['logo_icon']) ? null : '/branding/'.basename(parse_url($settings['logo_icon'], PHP_URL_PATH)),
-            'products' => $products, 'product' => $product,
+            'products' => $products, 'product' => $product, 'pmsBootstrap'=>$request->attributes->get('pms.bootstrap'),
             'productsPage' => $request->is('products'),
             'page' => $page,
             'posts' => $request->is('blog') ? DB::table('blog_posts')->where('published', true)->orderByDesc('updated_at')->get() : [],
             'announcement' => PortalContent::announcement(),
             'employee' => Auth::check() ? ['name' => Auth::user()->name, 'email' => Auth::user()->email] : null,
             'loginPage' => $request->is('login'),
+            'administrator'=>\App\Services\PlatformAccess::administrator($request), 'superAdmin'=>\App\Services\PlatformAccess::super($request),
             'admin' => (bool) $request->session()->get('judibas_admin'), 'settingsPage' => $request->is('admin*'),
             'error' => $request->session()->get('error'), 'success' => $request->session()->get('success'),
             'validationErrors' => $request->session()->get('errors')?->all() ?? [],

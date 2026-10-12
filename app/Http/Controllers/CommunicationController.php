@@ -235,7 +235,7 @@ class CommunicationController extends Controller
         $company = $v['kind'] === 'group' ? ($v['company_id'] ?? Access::company()) : null;
         if ($v['kind'] === 'group') {
             abort_unless($company, 422, 'Every group must belong to a company.');
-            if (! $admin) {
+            if (! \App\Services\PlatformAccess::administrator($r)) {
                 abort_unless(in_array((int)$company,Access::companies(),true),403);
             }
         }
@@ -267,7 +267,7 @@ class CommunicationController extends Controller
     {
         $this->mutable($r);
         $c = $this->conversation($r, $id);
-        abort_unless($c->kind !== 'community' || $this->isAdmin($r), 403, 'Only Super Admin can publish community announcements.');
+        abort_unless($c->kind !== 'community' || \App\Services\PlatformAccess::administrator($r), 403, 'Only Super Admin can publish community announcements.');
         $v = $r->validate(['body' => 'nullable|string|max:10000', 'reply_to' => 'nullable|integer', 'attachment' => 'nullable|file|max:10240|mimes:jpg,jpeg,png,webp,pdf,txt,csv,doc,docx,xls,xlsx,zip,webm,ogg,mp3,wav,m4a,mp4']);
         \App\Services\CommunicationMessagePolicy::enforce($r, $v['body'] ?? null);
         abort_unless(trim($v['body'] ?? '') !== '' || $r->hasFile('attachment'), 422, 'Enter a message or attach a file.');
@@ -303,7 +303,7 @@ class CommunicationController extends Controller
         $m = DB::table('communication_messages')->where('id', $id)->first();
         abort_unless($m, 404);
         $c = $this->conversation($r, $m->conversation_id);
-        abort_unless($c->kind !== 'community' || $this->isAdmin($r), 403);
+        abort_unless($c->kind !== 'community' || \App\Services\PlatformAccess::administrator($r), 403);
         abort_unless(! $m->deleted_at && ($this->isAdmin($r) ? $m->sender_id === null && $m->sender_name === 'Super Admin' : $m->sender_id === Auth::id()), 403);
         $v = $r->validate(['body' => 'required|string|max:10000']);
         \App\Services\CommunicationMessagePolicy::enforce($r, $v['body']);

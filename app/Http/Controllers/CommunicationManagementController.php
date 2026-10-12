@@ -23,7 +23,7 @@ class CommunicationManagementController extends Controller
         abort_unless(Access::manager($r), 403);
         abort_if($r->filled('view_user'), 403);
         $companies = DB::table('communication_companies')->orderBy('name');
-        if (! Access::super($r)) {
+        if (! \App\Services\PlatformAccess::administrator($r)) {
             $companies->whereIn('id', Access::companies());
         }
         $companies = $companies->get();
@@ -34,20 +34,20 @@ class CommunicationManagementController extends Controller
             $p->communication_access = DB::table('user_product_access')->where('user_id', $p->id)->where('product_slug', 'communication')->exists();
         }
 
-        return response()->json(['super' => Access::super($r), 'companies' => $companies, 'people' => $people,
+        return response()->json(['super' => \App\Services\PlatformAccess::administrator($r), 'companies' => $companies, 'people' => $people,
             'groups' => DB::table('communication_conversations')->where('kind', 'group')->whereIn('company_id', $ids)->orderBy('name')->get()->map(function ($g) {
                 $g->member_ids = DB::table('communication_members')->where('conversation_id', $g->id)->pluck('user_id');
 
                 return $g;
             }),
-            'invitations' => DB::table('communication_invitations')->whereIn('company_id', $ids)->orderByDesc('id')->limit(100)->get(['id', 'email', 'company_id', 'company_ids', 'communication_admin', 'delivery_status', 'group_ids', 'expires_at', 'accepted_at', 'revoked_at'])->filter(fn($i)=>Access::super($r)||!array_diff($this->invitationCompanies($i),$ids->all()))->values(),
+            'invitations' => DB::table('communication_invitations')->whereIn('company_id', $ids)->orderByDesc('id')->limit(100)->get(['id', 'email', 'company_id', 'company_ids', 'communication_admin', 'delivery_status', 'group_ids', 'expires_at', 'accepted_at', 'revoked_at'])->filter(fn($i)=>\App\Services\PlatformAccess::administrator($r)||!array_diff($this->invitationCompanies($i),$ids->all()))->values(),
             'mailer' => config('mail.default')]);
     }
 
     public function company(Request $r, ?int $id = null)
     {
         Access::mutable($r);
-        abort_unless(Access::super($r), 403);
+        abort_unless(\App\Services\PlatformAccess::administrator($r), 403);
         $v = $r->validate(['name' => ['required', 'string', 'max:100', Rule::unique('communication_companies')->ignore($id)]]);
         DB::transaction(function () use ($v, &$id) {
             if ($id) {
@@ -87,7 +87,7 @@ class CommunicationManagementController extends Controller
     public function deleteGroup(Request $r, int $id)
     {
         Access::mutable($r);
-        abort_unless(Access::super($r), 403);
+        abort_unless(\App\Services\PlatformAccess::administrator($r), 403);
         $g = DB::table('communication_conversations')->where('id', $id)->where('kind', 'group')->first();
         abort_unless($g, 404);
         $paths = DB::table('communication_messages')->where('conversation_id', $id)->whereNotNull('attachment_path')->pluck('attachment_path')->all();
@@ -100,8 +100,9 @@ class CommunicationManagementController extends Controller
     public function announce(Request $r)
     {
         Access::mutable($r);
-        abort_unless(Access::super($r), 403);
+        abort_unless(\App\Services\PlatformAccess::administrator($r), 403);
         $v = $r->validate(['company_ids' => 'required|array|min:1|max:100', 'company_ids.*' => 'required|integer|distinct|exists:communication_companies,id', 'body' => 'nullable|string|max:10000', 'attachment' => 'nullable|file|max:10240|mimes:jpg,jpeg,png,webp,pdf,txt,csv,doc,docx,xls,xlsx,zip,webm,ogg,mp3,wav,m4a,mp4']);
+        \App\Services\CommunicationMessagePolicy::enforce($r,$v['body']??null);
         abort_unless(trim($v['body'] ?? '') !== '' || $r->hasFile('attachment'), 422, 'Write an announcement or attach a file.');
         $paths = [];
         $ids = [];
@@ -114,7 +115,7 @@ class CommunicationManagementController extends Controller
                     if ($path) {
                         $paths[] = $path;
                     }
-                    $ids[] = DB::table('communication_messages')->insertGetId(['conversation_id' => $cid, 'sender_id' => null, 'sender_name' => 'Super Admin', 'body' => $v['body'] ?? null, 'attachment_path' => $path, 'attachment_name' => $file?->getClientOriginalName(), 'created_at' => now(), 'updated_at' => now()]);
+                    $ids[] = DB::table('communication_messages')->insertGetId(['conversation_id' => $cid, 'sender_id' => Access::super($r)?null:Auth::id(), 'sender_name' => Access::super($r)?'Super Admin':Auth::user()->name, 'body' => $v['body'] ?? null, 'attachment_path' => $path, 'attachment_name' => $file?->getClientOriginalName(), 'created_at' => now(), 'updated_at' => now()]);
                     DB::table('communication_conversations')->where('id', $cid)->update(['updated_at' => now()]);
                 }
             });
@@ -136,16 +137,17 @@ class CommunicationManagementController extends Controller
         $v['company_ids']=array_map('intval',$v['company_ids']);$v['company_id']=$v['company_ids'][0];
         foreach($v['company_ids'] as $company)Access::manageCompany($r,$company);
         abort_if($v['email'] === strtolower((string) config('judibas.admin_email')), 422, 'This email is reserved for Super Admin.');
-        abort_if(! Access::super($r) && ! empty($v['communication_admin']), 403, 'Only Super Admin can grant admin access.');
+        abort_if(! \App\Services\PlatformAccess::administrator($r) && ! empty($v['communication_admin']), 403, 'Only Super Admin can grant admin access.');
         $existing = User::where('email', $v['email'])->first();
-        abort_if($existing && (! $existing->is_active || (!Access::super($r) && !array_intersect(Access::companies($existing->id),$v['company_ids']))), 422, 'This account belongs to another company or is inactive. Super Admin must update it first.');
+        \App\Services\PlatformAccess::protectAccount($r,$existing?->id);
+        abort_if($existing && (! $existing->is_active || (!\App\Services\PlatformAccess::administrator($r) && !array_intersect(Access::companies($existing->id),$v['company_ids']))), 422, 'This account belongs to another company or is inactive. Super Admin must update it first.');
         foreach ($v['group_ids'] as $gid) {
             abort_unless(DB::table('communication_conversations')->where('id', $gid)->where('kind', 'group')->whereIn('company_id', $v['company_ids'])->exists(), 422, 'Selected groups must belong to the selected companies.');
         }
         $token = Str::random(64);
         $id = DB::transaction(function () use ($r, $v, $token) {
             $pending=DB::table('communication_invitations')->where('email',$v['email'])->whereNull('accepted_at')->whereNull('revoked_at')->get();
-            foreach($pending as $previous){abort_unless(Access::super($r)||!array_diff($this->invitationCompanies($previous),Access::companies()),403,'Super Admin must replace invitations spanning other companies.');}
+            foreach($pending as $previous){abort_unless(\App\Services\PlatformAccess::administrator($r)||!array_diff($this->invitationCompanies($previous),Access::companies()),403,'Super Admin must replace invitations spanning other companies.');}
             DB::table('communication_invitations')->whereIn('id',$pending->pluck('id'))->update(['revoked_at'=>now()]);
 
             return DB::table('communication_invitations')->insertGetId(['email' => $v['email'], 'company_id' => $v['company_id'], 'company_ids'=>json_encode($v['company_ids']), 'inviter_user_id' => Access::super($r) ? null : Auth::id(), 'invited_by_super' => Access::super($r), 'communication_admin' => (bool) ($v['communication_admin'] ?? false), 'group_ids' => json_encode($v['group_ids']), 'token_hash' => hash('sha256', $token), 'expires_at' => now()->addDays(7), 'created_at' => now(), 'updated_at' => now()]);

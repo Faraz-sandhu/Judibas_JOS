@@ -21,7 +21,7 @@ class EmployeeController extends Controller
 
     public function index(Request $request)
     {
-        PmsAccess::requirePermission(request(), 'employee-view');
+        abort_unless(\App\Services\PlatformAccess::administrator(request()),403,'Manage users and access in Judibas Administration.');
         $departments = Department::all();
         $roles = Role::all();
         if (true) {
@@ -35,14 +35,14 @@ class EmployeeController extends Controller
 
     public function create()
     {
-        PmsAccess::requirePermission(request(), 'employee-add');
+        abort_unless(\App\Services\PlatformAccess::administrator(request()),403,'Manage users and access in Judibas Administration.');
 
         return view('dashboard.employee.create');
     }
 
     public function store(Request $request)
     {
-        PmsAccess::requirePermission(request(), 'employee-add');
+        abort_unless(\App\Services\PlatformAccess::administrator(request()),403,'Manage users and access in Judibas Administration.');
         // Validate the request
         $validatedData = $request->validate([
             'name' => ['required', 'string', 'max:255', 'regex:'.self::PERSON_NAME_PATTERN],
@@ -92,7 +92,7 @@ class EmployeeController extends Controller
 
     public function edit($id)
     {
-        PmsAccess::requirePermission(request(), 'employee-edit');
+        abort_unless(\App\Services\PlatformAccess::administrator(request()),403,'Manage users and access in Judibas Administration.');
         $data = User::with(['departments:id', 'roles:id'])->findOrFail($id);
 
         return response()->json(['data' => $data]);
@@ -100,8 +100,9 @@ class EmployeeController extends Controller
 
     public function update(Request $request,int $id)
     {
+        \App\Services\PlatformAccess::protectAccount($request,$id);
         $request->merge(['record_id'=>$id]);
-        PmsAccess::requirePermission(request(), 'employee-edit');
+        abort_unless(\App\Services\PlatformAccess::administrator(request()),403,'Manage users and access in Judibas Administration.');
         $request->merge(['record_id'=>$id]);
         $validatedData = $request->validate([
             'name' => ['required', 'string', 'max:255', 'regex:'.self::PERSON_NAME_PATTERN],
@@ -132,7 +133,8 @@ class EmployeeController extends Controller
 
     public function destroy($id)
     {
-        PmsAccess::requirePermission(request(), 'employee-trash');
+        \App\Services\PlatformAccess::protectAccount(request(),(int)$id);
+        abort_unless(\App\Services\PlatformAccess::administrator(request()),403,'Manage users and access in Judibas Administration.');
         $employee = User::findOrFail($id);
         DB::transaction(function () use ($employee) {
             DB::table('pms_invitations')

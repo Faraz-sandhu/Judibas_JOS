@@ -35,6 +35,12 @@ Route::post('/admin/api/platform-settings/mail/test', [\App\Modules\Pms\Http\Con
 Route::post('/admin/api/platform-settings/realtime', [\App\Modules\Pms\Http\Controllers\RealtimeSettingController::class, 'update']);
 Route::post('/admin/api/platform-settings/realtime/test', [\App\Modules\Pms\Http\Controllers\RealtimeSettingController::class, 'test']);
 Route::get('/communication/api/realtime/config', function (Request $r) { CommunicationAccess::authorize($r); return response()->json(\App\Services\PlatformSettings::clientConfig())->header('Cache-Control','private, no-store'); });
+Route::get('/admin/api/invitations', [\App\Http\Controllers\PlatformInvitationController::class,'index']);
+Route::post('/admin/api/invitations', [\App\Http\Controllers\PlatformInvitationController::class,'store'])->middleware('throttle:communication-invite');
+Route::post('/admin/api/invitations/{id}/revoke', [\App\Http\Controllers\PlatformInvitationController::class,'revoke'])->whereNumber('id');
+Route::get('/invitations/{token}', [\App\Http\Controllers\PlatformInvitationController::class,'page']);
+Route::get('/invitations/{token}/details', [\App\Http\Controllers\PlatformInvitationController::class,'details']);
+Route::post('/invitations/{token}', [\App\Http\Controllers\PlatformInvitationController::class,'accept'])->middleware('throttle:invitation-accept');
 Route::post('/admin/api/{resource}/{id?}', [AdminController::class, 'save'])->whereNumber('id');
 Route::delete('/admin/api/{resource}/{id}', [AdminController::class, 'delete'])->whereNumber('id');
 foreach (array_keys(config('pages')) as $page) {
