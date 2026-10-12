@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
+import PlatformSettings from './PlatformSettings.vue';
 
 const props=defineProps<{communicationModule?:boolean;name:string;tagline:string;logo:string|null;csrf?:string;success?:string|null;errors?:string[]}>();
 type Row=Record<string,any>;
-const data=ref<Row|null>(null), tab=ref(props.communicationModule||window.location.hash==='#users'?'Users':'Dashboard'), editor=ref<Row|null>(null), error=ref(props.errors?.join(' ')||''), message=ref(props.success||''), busy=ref(false);
-const tabs=props.communicationModule?['Users']:['Dashboard','Blogs','Website','Products','Users','Branding'];
+const data=ref<Row|null>(null), tab=ref(props.communicationModule||window.location.hash==='#users'?'Users':window.location.hash==='#settings'?'Settings':'Dashboard'), editor=ref<Row|null>(null), error=ref(props.errors?.join(' ')||''), message=ref(props.success||''), busy=ref(false);
+const tabs=props.communicationModule?['Users']:['Dashboard','Blogs','Website','Products','Users','Settings','Branding'];
 async function request(url:string,method='GET',body?:Row){
 const response=await fetch(url,{method,headers:{Accept:'application/json','Content-Type':'application/json','X-CSRF-TOKEN':props.csrf||''},body:body?JSON.stringify(body):undefined});
 const result=await response.json();
@@ -12,8 +13,10 @@ if(!response.ok)throw new Error(result.errors?Object.values(result.errors).flat(
 return result;
 }
 async function load(){try{data.value=await request(props.communicationModule?'/communication/api/users':'/admin/api');}catch(e){error.value=(e as Error).message;}}
-onMounted(load);
-function select(value:string){tab.value=value;editor.value=null;error.value='';message.value='';}
+function hashChanged(){if(!props.communicationModule&&window.location.hash==='#settings')select('Settings');}
+onMounted(()=>{void load();window.addEventListener('hashchange',hashChanged);});
+onUnmounted(()=>window.removeEventListener('hashchange',hashChanged));
+function select(value:string){if(!props.communicationModule)history.replaceState(null,'',location.pathname+location.search+(value==='Settings'?'#settings':value==='Users'?'#users':''));tab.value=value;editor.value=null;error.value='';message.value='';}
 function edit(row?:Row){
 error.value='';message.value='';
 if(row){const copy:Row=JSON.parse(JSON.stringify(row));if(tab.value==='Users'){copy.password='';copy.company_ids=copy.company_ids||[copy.company_id].filter(Boolean);if(props.communicationModule)copy.product_slugs=copy.product_slugs.filter((slug:string)=>slug==='communication');}editor.value=copy;return;}
@@ -57,6 +60,7 @@ try{await request((props.communicationModule?'/communication/api/':'/admin/api/'
 <div class="admin-list"><p v-if="!data.users.length" class="empty-state">No employee accounts yet.</p><article v-for="user in data.users" :key="user.id"><div><strong>{{ user.name }}</strong><p class="muted">{{ user.email }} <span v-if="communicationModule">· {{ data.companies.filter((c:Row)=>(user.company_ids||[user.company_id]).includes(c.id)).map((c:Row)=>c.name).join(', ') }} · {{ user.communication_admin?'Communication Admin':'Member' }}</span> · {{ user.is_active?'Active':'Inactive' }} · {{ user.product_slugs.length }} products</p></div><div class="row-actions"><button @click="edit(user)">Edit</button><button :disabled="busy" @click="remove('users',user)">{{communicationModule?'Remove access':'Delete'}}</button></div></article></div>
 </template>
 
+<PlatformSettings v-if="tab==='Settings'&&!communicationModule" :csrf="csrf"/>
 <template v-if="tab==='Branding'"><h2>Branding</h2><form action="/admin/settings" method="post" enctype="multipart/form-data" class="settings-form"><input type="hidden" name="_token" :value="csrf"><label>Project name<input name="name" :value="name" maxlength="80" required></label><label>Homepage introduction<input name="tagline" :value="tagline" maxlength="160" required></label><label>Company logo<input name="logo" type="file" accept="image/png,image/jpeg,image/webp"><small>PNG, JPEG or WebP. Up to 2 MB.</small></label><img v-if="logo" :src="logo" alt="Current company logo" class="admin-logo"><button class="button primary">Save branding</button></form></template>
 </template>
 

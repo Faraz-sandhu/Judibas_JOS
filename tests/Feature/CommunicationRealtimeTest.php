@@ -52,6 +52,7 @@ class CommunicationRealtimeTest extends TestCase
     }
     public function test_batched_channel_auth_preserves_individual_authorization(): void
     {
+        config(['broadcasting.default' => 'reverb']);
         $u=$this->employee();$mine='private-communication.user.'.$u->id;$denied='private-communication.user.super';$presence='presence-communication.presence.'.$u->id;
         $r=$this->actingAs($u)->postJson('/broadcasting/auth/batch',['socket_id'=>'123.456','channels'=>[$mine,$denied,$presence]])->assertOk()->json('channels');
         $this->assertArrayHasKey('auth',$r[$mine]['data']);$this->assertArrayHasKey('auth',$r[$presence]['data']);$this->assertArrayHasKey('error',$r[$denied]);

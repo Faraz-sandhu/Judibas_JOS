@@ -17,16 +17,17 @@ class RealtimeSettingController extends Controller
 
     public function edit()
     {
-        PmsAccess::requirePermission(request(), 'realtime-settings');
+        abort_unless(request()->session()->get('judibas_admin'), 403);
 
         return view('dashboard.settings.realtime', ['settings' => RealtimeSetting::current()]);
     }
 
     public function update(Request $request)
     {
-        PmsAccess::requirePermission(request(), 'realtime-settings');
+        abort_unless(request()->session()->get('judibas_admin'), 403);
         $validated = $request->validate([
             'enabled' => ['required', 'boolean'],
+            'provider' => ['nullable', 'in:reverb,pusher'],
             'app_id' => ['nullable', 'string', 'max:255'],
             'app_key' => ['nullable', 'string', 'max:255'],
             'app_secret' => ['nullable', 'string', 'max:2000'],
@@ -38,6 +39,10 @@ class RealtimeSettingController extends Controller
             unset($validated['app_secret']);
         }
 
+        if (($validated['provider'] ?? null) === 'reverb') { foreach (['app_id','app_key','app_secret','cluster'] as $key) $validated[$key]=null; }
+        $provider=$validated['provider'] ?? null; unset($validated['provider']);
+        $candidate=clone $settings; $candidate->fill($validated);
+        if ($candidate->enabled && (($provider==='pusher' && $candidate->useReverb()) || (!$candidate->useReverb() && !$candidate->isComplete()))) return response()->json(['message'=>'Complete Pusher credentials are required. Settings were not changed.'],422);
         $settings->update($validated);
         cache()->forget('pms.realtime.settings');
 
@@ -48,5 +53,5 @@ class RealtimeSettingController extends Controller
         return response()->json(['message' => 'Realtime settings saved securely. Open pages must be refreshed to use changed credentials.']);
     }
 
-    public function test(Request $request){PmsAccess::requirePermission($request,'realtime-settings');try{\App\Modules\Pms\Services\PmsRealtime::testConnection();return response()->json(['message'=>'Realtime server accepted the test event.']);}catch(\Throwable $e){report($e);return response()->json(['message'=>'Realtime connection failed. Check the saved settings and server.'],422);}}
+    public function test(Request $request){abort_unless($request->session()->get('judibas_admin'),403);try{\App\Modules\Pms\Services\PmsRealtime::testConnection();return response()->json(['message'=>'Realtime server accepted the test event.']);}catch(\Throwable $e){report($e);return response()->json(['message'=>'Realtime connection failed. Check the saved settings and server.'],422);}}
 }

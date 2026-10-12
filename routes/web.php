@@ -29,6 +29,12 @@ Route::post('/admin/login', [PortalController::class, 'login'])->middleware('thr
 Route::post('/admin/settings', [PortalController::class, 'save']);
 Route::post('/admin/logout', [PortalController::class, 'logout']);
 Route::get('/admin/api', [AdminController::class, 'data']);
+Route::get('/admin/api/platform-settings', [\App\Http\Controllers\PlatformSettingsController::class, 'index']);
+Route::post('/admin/api/platform-settings/mail', [\App\Modules\Pms\Http\Controllers\MailSettingController::class, 'update']);
+Route::post('/admin/api/platform-settings/mail/test', [\App\Modules\Pms\Http\Controllers\MailSettingController::class, 'test']);
+Route::post('/admin/api/platform-settings/realtime', [\App\Modules\Pms\Http\Controllers\RealtimeSettingController::class, 'update']);
+Route::post('/admin/api/platform-settings/realtime/test', [\App\Modules\Pms\Http\Controllers\RealtimeSettingController::class, 'test']);
+Route::get('/communication/api/realtime/config', function (Request $r) { CommunicationAccess::authorize($r); return response()->json(\App\Services\PlatformSettings::clientConfig())->header('Cache-Control','private, no-store'); });
 Route::post('/admin/api/{resource}/{id?}', [AdminController::class, 'save'])->whereNumber('id');
 Route::delete('/admin/api/{resource}/{id}', [AdminController::class, 'delete'])->whereNumber('id');
 foreach (array_keys(config('pages')) as $page) {
@@ -76,12 +82,13 @@ Route::delete('/communication/api/users/{id}', [CommunicationUsersController::cl
 
 Route::post('/broadcasting/auth', function (Request $r) {
     CommunicationAccess::authorize($r);
+    abort_unless(in_array(config('broadcasting.default'), ['reverb','pusher']),422,'Realtime is disabled.');
     $r->validate(['socket_id' => 'required|string|max:100', 'channel_name' => 'required|string|max:200']);
     if (CommunicationAccess::super($r)) {
         $r->setUserResolver(fn () => new GenericUser(['id' => 'super']));
     }
 
-    return Broadcast::connection('reverb')->auth($r);
+    return Broadcast::connection()->auth($r);
 });
 
 Route::prefix('/communication/api/calls')->group(function () {
@@ -100,12 +107,13 @@ Route::post('/communication/api/presence', [\App\Http\Controllers\CommunicationP
 
 Route::post('/broadcasting/auth/batch', function (Request $r) {
  CommunicationAccess::authorize($r);
+    abort_unless(in_array(config('broadcasting.default'), ['reverb','pusher']),422,'Realtime is disabled.');
  $v=$r->validate(['socket_id'=>'required|string|max:100','channels'=>'required|array|min:1|max:100','channels.*'=>'required|string|max:200|distinct']);
  if(CommunicationAccess::super($r))$r->setUserResolver(fn()=>new GenericUser(['id'=>'super']));
  $results=[];
  foreach($v['channels'] as $name){
   $r->merge(['channel_name'=>$name]);
-  try{$results[$name]=['data'=>Broadcast::connection('reverb')->auth($r)];}
+  try{$results[$name]=['data'=>Broadcast::connection()->auth($r)];}
   catch(\Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException $e){$results[$name]=['error'=>'Channel authorization denied'];}
  }
  return response()->json(['channels'=>$results])->header('Cache-Control','private, no-store');

@@ -5,8 +5,7 @@ use Illuminate\Support\Facades\Event;
 use Pusher\Pusher;
 class PmsRealtime {
  public static function clientConfig():array {
-  $s=RealtimeSetting::current();$legacy=!$s->useReverb();$c=config('broadcasting.connections.reverb');
-  return ['enabled'=>$s->enabled&&(!$legacy||$s->isComplete()),'provider'=>$legacy?'pusher':'reverb','key'=>$legacy?$s->effectiveKey():$c['key'],'cluster'=>$legacy?$s->effectiveCluster():'mt1','host'=>env('VITE_REVERB_HOST')?:request()->getHost(),'port'=>$c['options']['port'],'scheme'=>$c['options']['scheme']];
+  return \App\Services\PlatformSettings::clientConfig();
  }
  private static function client():?Pusher {
   $s=RealtimeSetting::current();if(!$s->enabled)return null;

@@ -1,0 +1,40 @@
+/* Shared controls also cover Vue forms without Bootstrap's form classes. */
+.pms-workspace :is(input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=hidden]):not([type=button]):not([type=submit]), select, textarea) {
+  box-sizing: border-box;
+  min-width: 0;
+  border: 1px solid var(--pms-border) !important;
+  border-radius: 9px !important;
+  background-color: var(--pms-surface);
+  color: var(--pms-text);
+  font: inherit;
+  padding: 7px 14px;
+  outline: none;
+  outline-offset: 0;
+  box-shadow: none !important;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.pms-workspace :is(input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=hidden]):not([type=button]):not([type=submit]), select:not([multiple])) {
+  min-height: 40px;
+}
+.pms-workspace :is(input, select, textarea):not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):focus {
+  border-color: var(--pms-primary) !important;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--pms-primary-soft) !important;
+}
+.pms-workspace :is(input, textarea)::placeholder {
+  color: var(--pms-muted);
+  opacity: .75;
+}
+.pms-workspace :is(input, select, textarea):disabled {
+  cursor: not-allowed;
+  opacity: .65;
+}
+.pms-workspace :is(input, select, textarea).is-invalid {
+  border-color: var(--pms-danger) !important;
+}
+.pms-workspace :is(input, select, textarea).is-invalid:focus {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pms-danger) 15%, transparent) !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pms-workspace :is(input, select, textarea) { transition: none; }
+}

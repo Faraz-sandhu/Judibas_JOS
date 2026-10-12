@@ -1,7 +1,7 @@
 <script lang="ts">let openDialogs=0;let bodyOverflow="";</script>
 <script setup lang="ts">
 import {ref,onMounted,onBeforeUnmount} from 'vue';
-defineProps<{title:string;subtitle?:string;wide?:boolean;size?:'sm'|'lg'|'xl'|'assignment';centered?:boolean}>();
+withDefaults(defineProps<{title:string;subtitle?:string;wide?:boolean;size?:'sm'|'lg'|'xl'|'assignment';centered?:boolean}>(),{centered:true});
 const emit=defineEmits(['close']);const dialog=ref<HTMLElement|null>(null);let previous:HTMLElement|null=null;
 function keys(e:KeyboardEvent){if(!dialog.value||e.defaultPrevented||document.activeElement?.closest('[role=dialog]')!==dialog.value)return;if(e.key==='Escape'){e.preventDefault();e.stopImmediatePropagation();emit('close');}if(e.key==='Tab'){const nodes=Array.from(dialog.value.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex="0"]')).filter(n=>n.getClientRects().length);const first=nodes[0],last=nodes[nodes.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}}
 onMounted(()=>{if(openDialogs++===0){bodyOverflow=document.body.style.overflow;document.body.style.overflow='hidden';}previous=document.activeElement as HTMLElement;dialog.value?.focus();document.addEventListener('keydown',keys);});onBeforeUnmount(()=>{if(--openDialogs===0)document.body.style.overflow=bodyOverflow;document.removeEventListener('keydown',keys);previous?.focus();});

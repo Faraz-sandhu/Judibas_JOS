@@ -18,7 +18,7 @@ class MailSettingController extends Controller
 
     public function edit(EmailDeliveryService $emailDelivery)
     {
-        PmsAccess::requirePermission(request(), 'mail-settings');
+        abort_unless(request()->session()->get('judibas_admin'), 403);
         $settings = MailSetting::current();
         return view('dashboard.settings.mail', [
             'settings' => $settings,
@@ -29,7 +29,7 @@ class MailSettingController extends Controller
 
     public function update(Request $request)
     {
-        PmsAccess::requirePermission(request(), 'mail-settings');
+        abort_unless(request()->session()->get('judibas_admin'), 403);
         $validated = $request->validate([
             'host' => ['nullable', 'string', 'max:255'],
             'port' => ['required', 'integer', 'between:1,65535'],
@@ -63,7 +63,7 @@ class MailSettingController extends Controller
 
     public function test(Request $request)
     {
-        PmsAccess::requirePermission(request(), 'mail-settings');
+        abort_unless(request()->session()->get('judibas_admin'), 403);
         $validated = $request->validate(['test_email' => ['required', 'email', 'max:255']]);
         $settings = MailSetting::current();
         if (! $settings->host || ! $settings->from_address || ! $settings->password) {
@@ -78,7 +78,7 @@ class MailSettingController extends Controller
                 'eyebrow' => 'Email configuration',
                 'badge' => 'Test successful',
                 'title' => 'Your SMTP connection is working',
-                'recipientName' => \App\Modules\Pms\Services\PmsAuth::user()->name,
+                'recipientName' => 'Judibas administrator',
                 'bodyText' => 'This message confirms that your saved SMTP credentials can deliver application email successfully.',
                 'details' => [
                     'SMTP server' => $settings->host.':'.$settings->port,
@@ -86,15 +86,15 @@ class MailSettingController extends Controller
                     'From address' => $settings->from_address,
                 ],
                 'actionLabel' => 'Return to email settings',
-                'actionUrl' => route('settings.mail.edit'),
+                'actionUrl' => url('/admin').'#settings',
                 'note' => 'Task invitations and task activity notifications will use this same email configuration.',
             ], function ($message) use ($validated) {
-                $message->to($validated['test_email'])->subject('PMS email configuration test');
+                $message->to($validated['test_email'])->subject('Judibas email configuration test');
             });
             return response()->json(['message' => 'Test email sent to '.$validated['test_email'].'.']);
         } catch (\Throwable $exception) {
             report($exception);
-            return response()->json(['message' => 'Test email failed: '.$exception->getMessage()], 422);
+            return response()->json(['message' => 'Test email failed. Check the SMTP configuration and server logs.'], 422);
         } finally {config(['mail'=>$original]);Mail::purge('smtp');}
     }
 }

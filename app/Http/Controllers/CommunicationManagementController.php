@@ -154,8 +154,10 @@ class CommunicationManagementController extends Controller
         $status = 'sent';
         $message = 'Invitation email sent.';
         try {
-            Mail::to($v['email'])->send(new CommunicationInvitation($link, DB::table('communication_companies')->whereIn('id',$v['company_ids'])->orderBy('name')->pluck('name')->implode(', ')));
-            if (in_array(config('mail.default'), ['log', 'array'])) {
+            if (\App\Models\MailSetting::current()->invitation_emails_enabled) Mail::to($v['email'])->send(new CommunicationInvitation($link, DB::table('communication_companies')->whereIn('id',$v['company_ids'])->orderBy('name')->pluck('name')->implode(', ')));
+            if (!\App\Models\MailSetting::current()->invitation_emails_enabled) {
+                $status = 'log'; $message = 'Invitation created. Invitation emails are disabled in shared settings; use the acceptance link.';
+            } elseif (in_array(config('mail.default'), ['log', 'array'])) {
                 $status = 'log';
                 $message = 'Invitation created. Email delivery is not configured; use the acceptance link.';
             }
