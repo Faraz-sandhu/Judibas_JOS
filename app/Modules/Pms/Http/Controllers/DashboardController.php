@@ -14,12 +14,27 @@ use App\Modules\Pms\Services\PmsGate as Gate;
 
 class DashboardController extends Controller
 {
+    public function deadlines(Request $request)
+    {
+        $validated = $request->validate(['page' => 'sometimes|integer|min:1|max:100000']);
+        $page = (int) ($validated['page'] ?? 1);
+        $data = $this->dashboard(20, $page)->getData(true)['data']['dashboardInsights'];
+        return response()->json(['data' => $data['deadlines'], 'total' => $data['deadline_total'], 'page' => $page, 'per_page' => 20]);
+    }
+
+    public function bundle()
+    {
+        $summary = $this->dashboard()->getData(true);
+        $table = $this->index()->getData(true);
+        return response()->json(['data' => $summary['data'], 'table' => $table['data']]);
+    }
+
     public function web()
     {
         return view('welcome');
     }
 
-    public function dashboard()
+    public function dashboard(int $deadlineLimit = 5, int $deadlinePage = 1)
     {
         Gate::authorize('dashboard-view');
         $user = Auth::user();
@@ -196,15 +211,17 @@ class DashboardController extends Controller
             ->whereBetween('due_date', [now()->startOfDay(), now()->addDays(7)->endOfDay()])
             ->where('status', '!=', 'completed')
             ->with(['project:id,name', 'users:id,name,profile_img'])
-            ->orderBy('due_date')
-            ->limit(8);
+            ->orderBy('due_date')->orderBy('id');
         if (!$canViewTeamWorkload) {
             $deadlineQuery->where(fn ($query) => $query
                 ->whereHas('users', fn ($users) => $users->where('users.id', $user->id))
                 ->orWhereHas('subtasks.users', fn ($users) => $users->where('users.id', $user->id)));
         }
 
+        $deadlineTotal = (clone $deadlineQuery)->count();
+        $deadlineQuery->skip(($deadlinePage - 1) * $deadlineLimit)->take($deadlineLimit);
         $param['dashboardInsights'] = [
+            'deadline_total' => $deadlineTotal,
             'show_workload' => $canViewTeamWorkload,
             'workload' => [
                 'labels' => $workload->pluck('name')->values(),

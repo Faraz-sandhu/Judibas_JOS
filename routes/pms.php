@@ -79,6 +79,8 @@ Route::prefix('pms/api')->name('pms.')->middleware(\App\Modules\Pms\Http\Middlew
  Route::post('task-assignees/remove',function(\Illuminate\Http\Request $request){$request->validate(['task_id'=>'required|exists:pms_tasks,id']);app(\App\Modules\Pms\Http\Controllers\TaskController::class)->show((string)$request->task_id);return app(\App\Modules\Pms\Http\Controllers\TaskController::class)->RemoveAssignUser($request);});
  Route::post('subtask-approval',function(\Illuminate\Http\Request $request){$actor=\App\Modules\Pms\Services\PmsAuth::user();abort_unless($actor->hasRole('admin')||$actor->hasRole('project_manager')||$actor->hasRole('team_leader'),403);$request->validate(['subtask_id'=>'required|exists:pms_subtasks,id']);$subtask=\App\Modules\Pms\Models\Subtasks::findOrFail($request->subtask_id);app(\App\Modules\Pms\Http\Controllers\TaskController::class)->show((string)$subtask->task_id);$request->merge(['task_id'=>$subtask->task_id]);return app(\App\Modules\Pms\Http\Controllers\SubtaskController::class)->subTaskApprovalUpdate($request);});
  Route::get('realtime/config',fn()=>response()->json(\App\Modules\Pms\Services\PmsRealtime::clientConfig()));
+ Route::get('dashboard/deadlines',[\App\Modules\Pms\Http\Controllers\DashboardController::class,'deadlines']);
+ Route::get('dashboard/bundle',[\App\Modules\Pms\Http\Controllers\DashboardController::class,'bundle']);
  Route::get('dashboard/table',[\App\Modules\Pms\Http\Controllers\DashboardController::class,'index']);
  Route::get('dashboard',[\App\Modules\Pms\Http\Controllers\DashboardController::class,'dashboard']);
  Route::get('team-activity',[\App\Modules\Pms\Http\Controllers\DashboardController::class,'timeTrackingDashBoard']);

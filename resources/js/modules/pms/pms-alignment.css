@@ -974,3 +974,6 @@
  .pms-workspace .pms-sidebar{height:100vh;height:100dvh;align-self:start;top:0}
  .pms-workspace{background:linear-gradient(to right,var(--pms-surface) 260px,var(--pms-page) 260px)}
 }
+.pms-workspace .pms-deadlines-view-all{display:block;text-align:right;font-size:13px;margin:0 0 10px;color:var(--pms-primary)}
+.pms-workspace .pms-hierarchy-nav .pms-client-workspace>summary{color:var(--pms-muted);font-weight:400}
+.pms-workspace .pms-hierarchy-nav .pms-client-workspace>summary:is(.active,:hover){color:var(--pms-primary)}

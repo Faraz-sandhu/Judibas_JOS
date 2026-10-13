@@ -14,7 +14,7 @@ const invitationOpen=ref(false);const userSearch=ref(''),userStatus=ref('all'),u
 const userRows=computed(()=>data.value?.users.filter((u:Row)=>[u.name,u.email,...(u.company_ids||[]).map((id:number)=>data.value?.companies.find((c:Row)=>c.id===id)?.name||'')].join(' ').toLowerCase().includes(userSearch.value.toLowerCase())&&(userStatus.value==='all'||!!u.is_active===(userStatus.value==='active'))&&(!userProduct.value||u.product_slugs.includes(userProduct.value)))||[]);
 const userPages=computed(()=>Math.max(1,Math.ceil(userRows.value.length/pageSize)));const pagedUsers=computed(()=>userRows.value.slice((userPage.value-1)*pageSize,userPage.value*pageSize));watch([userSearch,userStatus,userProduct],()=>userPage.value=1);watch(userPages,n=>userPage.value=Math.min(userPage.value,n));
 const superAdmin=computed(()=>props.superAdmin??window.portal.admin);
-const navigationGroups=[{label:'Workspace',items:['Dashboard','Products','Communication',...(superAdmin.value?['Settings']:[])]},{label:'People & access',items:['Companies','Users','Invitations']},{label:'Website',items:['Blogs','Website',...(superAdmin.value?['Branding']:[])]}];
+const navigationGroups=[{label:'Workspace',items:['Dashboard','Products',...(superAdmin.value?['Settings']:[])]},{label:'People & access',items:['Companies','Users','Invitations']},{label:'Website',items:['Blogs','Website',...(superAdmin.value?['Branding']:[])]}];
 async function request(url:string,method='GET',body?:Row){
 const response=await fetch(url,{method,headers:{Accept:'application/json','Content-Type':'application/json','X-CSRF-TOKEN':props.csrf||''},body:body?JSON.stringify(body):undefined});
 const result=await response.json();

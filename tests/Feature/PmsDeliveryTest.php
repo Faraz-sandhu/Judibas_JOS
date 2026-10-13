@@ -6,6 +6,20 @@ use Tests\TestCase;
 class PmsDeliveryTest extends TestCase {
  use DatabaseTransactions;
  protected function setUp():void {parent::setUp();$this->seed(\App\Modules\Pms\Database\Seeders\PmsFoundationSeeder::class);}
+ public function test_dashboard_bundle_preserves_summary_and_table_and_requires_access():void {
+  $this->getJson('/pms/api/dashboard/bundle')->assertForbidden();
+  $this->withSession(['judibas_admin'=>true]);
+  $summary=$this->getJson('/pms/api/dashboard')->assertOk()->json('data');
+  $table=$this->getJson('/pms/api/dashboard/table')->assertOk()->json('data');
+  $bundle=$this->getJson('/pms/api/dashboard/bundle')->assertOk();
+  $this->assertEquals($summary,$bundle->json('data'));
+  $this->assertEquals($table,$bundle->json('table'));
+  $this->assertLessThanOrEqual(5,count($bundle->json('data.dashboardInsights.deadlines')));
+  $all=$this->getJson('/pms/api/dashboard/deadlines')->assertOk();
+  $this->assertEquals($bundle->json('data.dashboardInsights.deadline_total'),$all->json('total'));
+  $this->assertEquals(min(20,$all->json('total')),count($all->json('data')));
+  $this->getJson('/pms/api/dashboard/deadlines?page=0')->assertUnprocessable();
+ }
  public function test_project_creation_preserves_normalized_name_dates_and_workflow_links():void {
   $this->withSession(['judibas_admin'=>true]);$workflow=DB::table('pms_workflows')->where('is_default',true)->value('id');
   $payload=['name'=>' Parity  Project ','company_name'=>'Parity Client','start_date'=>'2026-10-09','end_date'=>'2026-10-20','workflow_ids'=>[$workflow],'department_ids'=>[]];
