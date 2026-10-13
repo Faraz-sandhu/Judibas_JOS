@@ -14,8 +14,8 @@ class ProjectTaskListController extends Controller
     {
         PmsAccess::requirePermission($request, 'project-view');
         $user = PmsAuth::user();
-        $admin = $user->hasRole('admin');
-        abort_unless($admin || $project->users()->where('users.id', $user->id)->exists(), 403);
+        $admin = \App\Modules\Pms\Services\PmsVisibility::allProjects()||\App\Modules\Pms\Services\PmsVisibility::teamTasks();
+        abort_unless($admin || $project->tasks()->exists(),403);
         $tasks = $project->tasks()->with('users:id,name,profile_img');
         if (!$admin && !$user->hasRole('project_manager')) {
             $tasks->where(fn ($q) => $q->whereHas('users', fn ($u) => $u->where('users.id', $user->id))

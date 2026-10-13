@@ -38,3 +38,23 @@
 @media (prefers-reduced-motion: reduce) {
   .pms-workspace :is(input, select, textarea) { transition: none; }
 }
+
+/* Shared dropdown menu matches the project index status/approval menus. */
+.pms-workspace select:not([multiple]):not([size]),.pms-workspace select[size="1"] {
+  appearance:none;-webkit-appearance:none;padding-right:36px !important;cursor:pointer;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%23949bad' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") !important;
+  background-repeat:no-repeat !important;background-position:right 11px center !important;background-size:18px !important;
+}
+.pms-shared-select-menu{position:fixed;z-index:1600;overflow-y:auto;overscroll-behavior:contain;background:var(--pms-surface);color:var(--pms-text);border:1px solid var(--pms-border);border-radius:6px;padding:6px;box-shadow:0 6px 18px #0003;font:14px/1.5 'Public Sans',system-ui,sans-serif;box-sizing:border-box}
+.pms-shared-select-menu button{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;padding:8px 12px;min-height:36px;border:0;border-radius:4px;background:transparent;color:var(--pms-text);text-align:left;font:inherit;cursor:pointer}
+.pms-shared-select-menu button:is(:hover,[data-highlighted=true],[aria-selected=true]):not(:disabled){background:var(--pms-primary-soft);color:var(--pms-primary)}
+.pms-shared-select-menu button:disabled{opacity:.5;cursor:not-allowed}.pms-shared-select-menu button span{min-width:0;overflow-wrap:anywhere}.pms-shared-select-menu button svg{flex-shrink:0}.pms-select-group{padding:7px 12px 3px;font-size:11px;text-transform:uppercase;color:var(--pms-muted)}
+.pms-workspace .pms-multiselect-trigger{border-color:var(--pms-border);background:var(--pms-surface);color:var(--pms-text)}
+.pms-workspace .pms-multiselect-menu{border-radius:6px;padding:6px;box-shadow:0 6px 18px #0003}.pms-workspace .pms-multiselect-options label.check{border-radius:4px}.pms-workspace .pms-multiselect-options label.check:hover{background:var(--pms-primary-soft)}
+
+/* Filter selects need room for their label and the shared dropdown arrow. */
+.pms-workspace .pms-datatable-search{flex-wrap:wrap;justify-content:flex-end;min-width:0;max-width:100%}
+.pms-workspace .pms-datatable-search select:not([multiple]){width:144px !important;min-width:144px !important;flex:0 0 144px;max-width:100%;font-size:14px}
+.pms-workspace .pms-datatable-search>label{min-width:0;max-width:100%}
+.pms-workspace .pms-datatable-search input{max-width:100%}
+@media(max-width:700px){.pms-workspace .pms-datatable-search{justify-content:flex-start}}

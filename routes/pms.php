@@ -10,6 +10,14 @@ Route::get('/pms/invitation/{token}',[\App\Modules\Pms\Http\Controllers\Invitati
 Route::post('/pms/invitation/{token}',[\App\Modules\Pms\Http\Controllers\InvitationController::class,'completeJoin'])->name('pms.invitations.join.complete');
 Route::get('/pms',[WorkspaceController::class,'page'])->name('pms.workspace');
 Route::prefix('pms/api')->name('pms.')->middleware(\App\Modules\Pms\Http\Middleware\AuthorizeWorkspace::class)->group(function(){
+ Route::get('hierarchy-board',[\App\Modules\Pms\Http\Controllers\HierarchyBoardController::class,'index']);
+ Route::patch('hierarchy-board/tasks/{task}/status',[\App\Modules\Pms\Http\Controllers\HierarchyBoardController::class,'move']);
+ Route::get('hierarchy',[\App\Modules\Pms\Http\Controllers\ClientController::class,'hierarchy']);
+ Route::get('clients',[\App\Modules\Pms\Http\Controllers\ClientController::class,'index']);
+ Route::post('clients',[\App\Modules\Pms\Http\Controllers\ClientController::class,'save']);
+ Route::post('clients/{client}',[\App\Modules\Pms\Http\Controllers\ClientController::class,'save']);
+ Route::delete('clients/{client}',[\App\Modules\Pms\Http\Controllers\ClientController::class,'destroy']);
+ Route::get('projects/{project}/departments',[\App\Modules\Pms\Http\Controllers\ProjectController::class,'projectDepartments']);
  Route::get('projects/{project}/task-list', \App\Modules\Pms\Http\Controllers\ProjectTaskListController::class);
  Route::post('invitations/{token}/respond',[\App\Modules\Pms\Http\Controllers\InvitationController::class,'respond']);
  Route::get('invitations',[\App\Modules\Pms\Http\Controllers\InvitationController::class,'index']);
@@ -37,6 +45,8 @@ Route::prefix('pms/api')->name('pms.')->middleware(\App\Modules\Pms\Http\Middlew
  Route::post('projects/{projectId}/chat/seen',[\App\Modules\Pms\Http\Controllers\ProjectChatController::class,'markMessagesAsSeen']);
  Route::delete('project-chat/{id}',[\App\Modules\Pms\Http\Controllers\ProjectChatController::class,'delete']);
  Route::post('broadcasting/auth',fn(\Illuminate\Http\Request $request)=>\App\Modules\Pms\Services\PmsRealtime::authorize($request));
+ Route::get('tasks/{task}/transfer',[\App\Modules\Pms\Http\Controllers\TaskTransferController::class,'options']);
+ Route::post('tasks/{task}/transfer',[\App\Modules\Pms\Http\Controllers\TaskTransferController::class,'store']);
  Route::get('tasks/{task}/handoff',[\App\Modules\Pms\Http\Controllers\TaskHandoffController::class,'options']);
  Route::post('tasks/{task}/handoff',[\App\Modules\Pms\Http\Controllers\TaskHandoffController::class,'store']);
  Route::get('tasks/{task}/placement-options',[\App\Modules\Pms\Http\Controllers\TaskHandoffController::class,'placementOptions']);

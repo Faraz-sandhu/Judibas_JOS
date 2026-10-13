@@ -19,8 +19,9 @@ class PmsCollaborationTest extends TestCase {
   $this->postJson('/pms/api/projects/'.$project.'/chat/seen')->assertOk();
   $this->assertContains('super',\App\Modules\Pms\Models\ProjectChat::findOrFail($message)->seen_by);
   $user=\App\Models\User::factory()->create(['is_active'=>true]);DB::table('user_product_access')->insert(['user_id'=>$user->id,'product_slug'=>'projects']);
-  $this->withSession(['judibas_admin'=>false])->actingAs($user)->getJson('/pms/api/projects/'.$project.'/chat')->assertForbidden();
+  $this->withSession(['judibas_admin'=>false])->actingAs($user)->getJson('/pms/api/projects/'.$project.'/chat')->assertNotFound();
   $this->deleteJson('/pms/api/project-chat/'.$message)->assertForbidden();
+  $platform=DB::table('communication_companies')->insertGetId(['name'=>'Collaboration Company','created_at'=>now(),'updated_at'=>now()]);$company=DB::table('pms_companies')->insertGetId(['name'=>'Collaboration Company','platform_company_id'=>$platform,'status'=>true,'created_at'=>now(),'updated_at'=>now()]);DB::table('pms_projects')->where('id',$project)->update(['company_id'=>$company]);DB::table('communication_company_memberships')->insert(['company_id'=>$platform,'user_id'=>$user->id]);$task=DB::table('pms_tasks')->insertGetId(['title'=>'Collaboration assignment','project_id'=>$project,'status'=>'pending','created_at'=>now(),'updated_at'=>now()]);DB::table('pms_task_user')->insert(['task_id'=>$task,'user_id'=>$user->id]);
   DB::table('pms_project_user')->insert(['user_id'=>$user->id,'project_id'=>$project]);
   $this->getJson('/pms/api/projects/'.$project.'/chat')->assertOk();
   $own=$this->postJson('/pms/api/projects/'.$project.'/chat',['message'=>'Member note'])->assertOk()->json('message.id');

@@ -61,6 +61,7 @@ class TaskHandoffController extends Controller
         if (! empty($data['destination_project_id'])) {
             $destinationProject = Projects::query()->where('approval', 'approved')
                 ->whereHas('departments', fn (Builder $query) => $query->where('pms_departments.id', $data['destination_department_id']))
+                ->when($task->project?->company_id,fn($q)=>$q->where('company_id',$task->project->company_id))
                 ->with(['workflows' => fn ($query) => $query->where('is_active', true)->with('columns')])
                 ->findOrFail($data['destination_project_id']);
         }
@@ -104,7 +105,7 @@ class TaskHandoffController extends Controller
                 ]);
             }
 
-            $leadIds = User::query()->where('status', 1)
+            $leadIds = User::query()->where('status', 1)->where(function($q)use($destinationProject){\App\Modules\Pms\Services\PmsVisibility::assignees($q,$destinationProject?->company_id);})
                 ->whereHas('departments', fn (Builder $query) => $query->where('pms_departments.id', $data['destination_department_id']))
                 ->whereHas('roles', fn (Builder $query) => $query->where('role_key', 'team_leader'))
                 ->pluck('id');
@@ -153,7 +154,7 @@ class TaskHandoffController extends Controller
     {
         $this->authorizeTask($task);PmsAccess::requirePermission(request(),'task-edit');
         abort_unless($task->department_id && !$task->project_id,422);
-        $projects=Projects::where('approval','approved')->whereHas('departments',fn(Builder $query)=>$query->where('pms_departments.id',$task->department_id))->whereHas('workflows',fn(Builder $query)=>$query->where('is_active',true))->with('sprints')->orderBy('name')->get();
+        $projects=Projects::where('approval','approved')->whereHas('departments',fn(Builder $query)=>$query->where('pms_departments.id',$task->department_id))->whereHas('workflows',fn(Builder $query)=>$query->where('is_active',true))->with(['sprints'=>fn($q)=>$q->where('department_id',$task->department_id)])->orderBy('name')->get();
         return response()->json(['projects'=>$projects]);
     }
     public function place(Request $request, Tasks $task)
@@ -170,7 +171,7 @@ class TaskHandoffController extends Controller
             ->with(['workflows' => fn ($query) => $query->where('is_active', true)->with('columns')])
             ->findOrFail($data['project_id']);
         if (! empty($data['sprint_id'])) {
-            abort_unless($project->sprints()->whereKey($data['sprint_id'])->exists(), 422, 'The selected sprint does not belong to this project.');
+            abort_unless($project->sprints()->where('department_id',$task->department_id)->whereKey($data['sprint_id'])->exists(), 422, 'The selected sprint does not belong to this project.');
         }
         $workflow = $project->workflows->first();
         $column = $workflow?->columns->firstWhere('is_initial', true) ?? $workflow?->columns->first();
@@ -192,7 +193,7 @@ class TaskHandoffController extends Controller
     {
         PmsAccess::requirePermission(request(), 'task-handoff');
         $user = Auth::user();
-        $allowed = $user->hasRole('admin')
+        $allowed = \App\Modules\Pms\Services\PmsVisibility::allProjects()
             || ($task->project && $task->project->users()->where('users.id', $user->id)->exists())
             || $task->users()->where('users.id', $user->id)->exists();
         if (! $allowed && $task->department_id && $user->can('department-task-view-all')) {

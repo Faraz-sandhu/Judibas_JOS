@@ -77,14 +77,11 @@ class TaskIssueController extends Controller
     {
         Gate::authorize('project-view');
         $user = \App\Modules\Pms\Services\PmsAuth::user();
-        if ($user->hasRole('admin')) {
+        if (\App\Modules\Pms\Services\PmsVisibility::allProjects()) {
             return;
         }
-        if ($user->hasRole('project_manager') || $user->hasRole('team_leader')) {
-            abort_unless($task->project->users()->where('users.id', $user->id)->exists(), 403);
+        if(\App\Modules\Pms\Services\PmsVisibility::teamTasks()&&in_array($task->department_id,\App\Modules\Pms\Services\PmsVisibility::teamDepartmentIds()))return;
 
-            return;
-        }
         abort_unless(
             $task->users()->where('users.id', $user->id)->exists()
             || $task->subtasks()->whereHas('users', fn ($query) => $query->where('users.id', $user->id))->exists(),

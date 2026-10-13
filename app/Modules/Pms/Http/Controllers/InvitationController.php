@@ -296,6 +296,11 @@ class InvitationController extends Controller
                 $user->departments()->syncWithoutDetaching([$departmentId]);
             }
 
+            if(!$invitation->isEmployeeOnboarding()){
+                $target=$invitation->invitable;$project=$target instanceof Projects?$target:($target instanceof Tasks?$target->project:$target?->task?->project);
+                $company=$project?->company_id?DB::table('pms_companies')->where('id',$project->company_id)->value('platform_company_id'):null;
+                if($company){DB::table('communication_company_memberships')->insertOrIgnore(['company_id'=>$company,'user_id'=>$user->id]);DB::table('users')->where('id',$user->id)->update(['company_id'=>$company]);}
+            }
             $invitation->update(['recipient_id' => $user->id]);
             if ($invitation->isEmployeeOnboarding()) {
                 $invitation->update(['accepted_at' => now()]);

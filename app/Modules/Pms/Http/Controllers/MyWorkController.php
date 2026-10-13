@@ -28,7 +28,7 @@ class MyWorkController extends Controller
         ]);
 
         $user = \App\Modules\Pms\Services\PmsAuth::user();
-        $canManageTeam = Gate::allows('my-work-manage-team');
+        $canManageTeam = \App\Modules\Pms\Services\PmsVisibility::allProjects() || \App\Modules\Pms\Services\PmsVisibility::teamTasks();
         $canQuickAssign = $user->hasRole('admin') || $user->hasRole('project_manager') || $user->hasRole('team_leader');
         $query = Tasks::query()->with([
             'project:id,name',
@@ -41,8 +41,6 @@ class MyWorkController extends Controller
             $query->where(fn (Builder $tasks) => $tasks
                 ->whereHas('users', fn (Builder $users) => $users->where('users.id', $user->id))
                 ->orWhereHas('subtasks.users', fn (Builder $users) => $users->where('users.id', $user->id)));
-        } elseif (! $user->hasRole('admin')) {
-            $query->whereHas('project.users', fn (Builder $users) => $users->where('users.id', $user->id));
         }
 
         $accessibleProjectIds = (clone $query)->reorder()->select('pms_tasks.project_id')->distinct()->pluck('project_id');

@@ -28,7 +28,7 @@ class ReportController extends Controller
         $canViewAll = $this->canViewAllReports($user);
         $departmentIds = $this->reportDepartmentIds($user);
 
-        $projectsQuery = Projects::query()->select('id', 'company_id', 'name');
+        $projectsQuery = Projects::query()->select('id', 'company_id','client_id', 'name');
         if (! $canViewAll) {
             $projectsQuery->whereHas('tasks', function (Builder $tasks) use ($user, $departmentIds): void {
                 $this->applyTaskVisibility($tasks, $user, $departmentIds);
@@ -38,9 +38,9 @@ class ReportController extends Controller
 
         $users = User::query()
             ->select('id', 'name')
-            ->when(! $canViewAll && $user->hasRole('team_leader'), fn (Builder $query) => $query
+            ->when(! $canViewAll && \App\Modules\Pms\Services\PmsVisibility::teamTasks(), fn (Builder $query) => $query
                 ->whereHas('departments', fn (Builder $departments) => $departments->whereIn('pms_departments.id', $departmentIds)))
-            ->when(! $canViewAll && ! $user->hasRole('team_leader'), fn (Builder $query) => $query->whereKey($user->id))
+            ->when(! $canViewAll && ! \App\Modules\Pms\Services\PmsVisibility::teamTasks(), fn (Builder $query) => $query->whereKey($user->id))
             ->orderBy('name')
             ->get();
 
@@ -54,13 +54,15 @@ class ReportController extends Controller
             ->orderBy('dept_name')
             ->get(['id', 'dept_name']);
 
-        return view('dashboard.reports.index', compact('projects', 'users', 'companies', 'departments'));
+        $clients=\App\Modules\Pms\Models\Client::whereIn('id',$projects->pluck('client_id')->filter())->orderBy('name')->get(['id','name','company_id']);
+        return view('dashboard.reports.index', compact('clients','projects', 'users', 'companies', 'departments'));
     }
 
     public function overview(Request $request)
     {
         PmsAccess::requirePermission(request(), 'report-view');
         $filters = $request->validate([
+            'client_id'=>['nullable','integer','exists:pms_clients,id'],
             'company_id' => ['nullable', 'integer', 'exists:pms_companies,id'],
             'project_id' => ['nullable', 'integer', 'exists:pms_projects,id'],
             'department_id' => ['nullable', 'integer', 'exists:pms_departments,id'],
@@ -115,6 +117,7 @@ class ReportController extends Controller
         $query = Tasks::query()
             ->join('pms_projects', 'pms_projects.id', '=', 'pms_tasks.project_id')
             ->when($filters['company_id'] ?? null, fn ($q, $id) => $q->where('pms_projects.company_id', $id))
+            ->when($filters['client_id']??null,fn($q,$id)=>$q->where('pms_projects.client_id',$id))
             ->when($filters['project_id'] ?? null, fn ($q, $id) => $q->where('pms_tasks.project_id', $id))
             ->when($filters['department_id'] ?? null, fn ($q, $id) => $q->where('pms_tasks.department_id', $id))
             ->when($filters['user_id'] ?? null, fn ($q, $id) => $q->whereHas('timerLogs', fn ($logs) => $logs->where('user_id', $id)))
@@ -133,14 +136,14 @@ class ReportController extends Controller
     {
         $user ??= \App\Modules\Pms\Services\PmsAuth::user();
 
-        return $user->hasRole('admin') || $user->hasRole('project_manager');
+        return \App\Modules\Pms\Services\PmsVisibility::allProjects();
     }
 
     private function reportDepartmentIds(?User $user = null)
     {
         $user ??= \App\Modules\Pms\Services\PmsAuth::user();
 
-        return $user->departments()->pluck('pms_departments.id');
+        return $user->departments()->pluck('pms_departments.id')->merge(Tasks::query()->distinct()->pluck('department_id'))->filter()->unique();
     }
 
     private function enforceReportFilterAccess(array $filters): void
@@ -161,7 +164,7 @@ class ReportController extends Controller
             return;
         }
 
-        $canViewUser = $user->hasRole('team_leader')
+        $canViewUser = \App\Modules\Pms\Services\PmsVisibility::teamTasks()
             ? User::query()
                 ->whereKey($filters['user_id'])
                 ->whereHas('departments', fn (Builder $departments) => $departments
@@ -172,50 +175,8 @@ class ReportController extends Controller
         abort_unless($canViewUser, 403, 'You cannot view reports for this employee.');
     }
 
-    private function applyTaskVisibility(
-        Builder $query,
-        ?User $user = null,
-        $departmentIds = null
-    ): void {
-        $user ??= \App\Modules\Pms\Services\PmsAuth::user();
-
-        if ($this->canViewAllReports($user)) {
-            return;
-        }
-
-        if ($user->hasRole('team_leader')) {
-            $departmentIds ??= $this->reportDepartmentIds($user);
-            $query->whereIn('pms_tasks.department_id', $departmentIds);
-
-            return;
-        }
-
-        $query->where(function (Builder $tasks) use ($user): void {
-            $tasks->whereHas('users', fn (Builder $users) => $users->where('users.id', $user->id))
-                ->orWhereHas('subtasks.users', fn (Builder $users) => $users->where('users.id', $user->id));
-        });
-    }
-
-    private function applySubtaskVisibility(
-        Builder $query,
-        ?User $user = null,
-        $departmentIds = null
-    ): void {
-        $user ??= \App\Modules\Pms\Services\PmsAuth::user();
-
-        if ($this->canViewAllReports($user)) {
-            return;
-        }
-
-        if ($user->hasRole('team_leader')) {
-            $departmentIds ??= $this->reportDepartmentIds($user);
-            $query->whereHas('task', fn (Builder $tasks) => $tasks->whereIn('pms_tasks.department_id', $departmentIds));
-
-            return;
-        }
-
-        $query->whereHas('users', fn (Builder $users) => $users->where('users.id', $user->id));
-    }
+    private function applyTaskVisibility(Builder $query,?User $user=null,$departmentIds=null):void {}
+    private function applySubtaskVisibility(Builder $query,?User $user=null,$departmentIds=null):void {}
 
     private function applyDeadlineHealth(Builder $query, ?string $health): Builder
     {
@@ -234,6 +195,7 @@ class ReportController extends Controller
     {
         PmsAccess::requirePermission(request(), 'report-view');
         $filters = $request->validate([
+            'client_id'=>['nullable','integer','exists:pms_clients,id'],
             'company_id' => ['nullable', 'integer', 'exists:pms_companies,id'],
             'project_id' => ['nullable', 'integer', 'exists:pms_projects,id'],
             'department_id' => ['nullable', 'integer', 'exists:pms_departments,id'],
@@ -268,7 +230,7 @@ class ReportController extends Controller
         if ($subtask_id) {
             // Only fetch the specific subtask
             $subtasksQuery = Subtasks::where('id', $subtask_id)
-                ->with(['assignees:id,name', 'task.project.company:id,name', 'task.department:id,dept_name', 'timerLogs.user:id,name']);
+                ->with(['assignees:id,name', 'task.project.company:id,name','task.project.client:id,name', 'task.department:id,dept_name', 'timerLogs.user:id,name']);
 
             $this->applySubtaskReportFilters($subtasksQuery, $filters);
 
@@ -295,7 +257,7 @@ class ReportController extends Controller
             $subtasks = $subtasksQuery->get()->map(fn ($subtask) => $this->subtaskReportRow($subtask, $filters));
         } else {
             // Fetch tasks
-            $tasksQuery = Tasks::with(['assignees:id,name', 'project.company:id,name', 'department:id,dept_name', 'timerLogs.user:id,name']);
+            $tasksQuery = Tasks::with(['assignees:id,name', 'project.company:id,name','project.client:id,name', 'department:id,dept_name', 'timerLogs.user:id,name']);
             $this->applyTaskReportFilters($tasksQuery, $filters);
             if ($project_id) {
                 $tasksQuery->where('project_id', $project_id);
@@ -327,7 +289,7 @@ class ReportController extends Controller
             $tasks = $tasksQuery->get()->map(fn ($task) => $this->taskReportRow($task, $filters));
 
             // Fetch subtasks
-            $subtasksQuery = Subtasks::with(['assignees:id,name', 'task.project.company:id,name', 'task.department:id,dept_name', 'timerLogs.user:id,name']);
+            $subtasksQuery = Subtasks::with(['assignees:id,name', 'task.project.company:id,name','task.project.client:id,name', 'task.department:id,dept_name', 'timerLogs.user:id,name']);
             $this->applySubtaskReportFilters($subtasksQuery, $filters);
             if ($task_id) {
                 $subtasksQuery->where('task_id', $task_id);
@@ -397,7 +359,8 @@ class ReportController extends Controller
     {
         $this->applyTaskVisibility($query);
 
-        $query->when($filters['company_id'] ?? null, fn ($q, $id) => $q->whereHas('project', fn ($p) => $p->where('company_id', $id)))
+        $query->when($filters['client_id']??null,fn($q,$id)=>$q->whereHas('project',fn($p)=>$p->where('client_id',$id)))
+            ->when($filters['company_id'] ?? null, fn ($q, $id) => $q->whereHas('project', fn ($p) => $p->where('company_id', $id)))
             ->when($filters['department_id'] ?? null, fn ($q, $id) => $q->where('department_id', $id));
         $this->applyWorkLogFilters($query, $filters);
         $this->applyDeadlineHealth($query, $filters['deadline_health'] ?? null);
@@ -407,7 +370,8 @@ class ReportController extends Controller
     {
         $this->applySubtaskVisibility($query);
 
-        $query->when($filters['company_id'] ?? null, fn ($q, $id) => $q->whereHas('task.project', fn ($p) => $p->where('company_id', $id)))
+        $query->when($filters['client_id']??null,fn($q,$id)=>$q->whereHas('task.project',fn($p)=>$p->where('client_id',$id)))
+            ->when($filters['company_id'] ?? null, fn ($q, $id) => $q->whereHas('task.project', fn ($p) => $p->where('company_id', $id)))
             ->when($filters['department_id'] ?? null, fn ($q, $id) => $q->whereHas('task', fn ($t) => $t->where('department_id', $id)))
             ->when($filters['deadline_health'] ?? null, function ($q, $health) {
                 $column = 'pms_subtasks.due_date';
@@ -450,6 +414,7 @@ class ReportController extends Controller
         $seconds = (int) $periodLogs->whereNotNull('end_time')->sum(fn ($log) => $log->start_time->diffInSeconds($log->end_time));
 
         return [
+            'client_name'=>$project?->client?->name ?? '-',
             'company_name' => $project?->company?->name ?? 'Unassigned',
             'project_name' => $project?->name ?? '-',
             'department_name' => $department?->dept_name ?? 'Unassigned',

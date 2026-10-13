@@ -33,6 +33,11 @@ class PermissionSeeder extends Seeder
             ['permission_name' => 'Permission Add', 'permission_key' => 'permission-add'],
             ['permission_name' => 'Permission Edit', 'permission_key' => 'permission-edit'],
             ['permission_name' => 'Permission Delete', 'permission_key' => 'permission-trash'],
+            ['permission_name'=>'View clients','permission_key'=>'client-view'],
+            ['permission_name'=>'Create clients','permission_key'=>'client-add'],
+            ['permission_name'=>'Edit clients','permission_key'=>'client-edit'],
+            ['permission_name'=>'Delete clients','permission_key'=>'client-trash'],
+            ['permission_name'=>'View all company projects','permission_key'=>'project-view-all'],
             // projects
             ['permission_name' => 'Project View', 'permission_key' => 'project-view'],
             ['permission_name' => 'Project Assign', 'permission_key' => 'project-assign'],
@@ -44,6 +49,8 @@ class PermissionSeeder extends Seeder
             ['permission_name' => 'Department Add', 'permission_key' => 'department-add'],
             ['permission_name' => 'Department Edit', 'permission_key' => 'department-edit'],
             ['permission_name' => 'Department Delete', 'permission_key' => 'department-trash'],
+            ['permission_name'=>'View department team tasks','permission_key'=>'task-view-team'],
+            ['permission_name'=>'Transfer tasks between companies','permission_key'=>'task-transfer-company'],
             // Task
             ['permission_name' => 'Task Add', 'permission_key' => 'task-add'],
             ['permission_name' => 'Task Edit', 'permission_key' => 'task-edit'],

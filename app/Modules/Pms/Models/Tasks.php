@@ -9,6 +9,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Tasks extends Model
 {
+    protected static function booted():void {static::addGlobalScope('visibility',fn(\Illuminate\Database\Eloquent\Builder $q)=>\App\Modules\Pms\Services\PmsVisibility::tasks($q));}
+
     protected $table = 'pms_tasks';
 
     protected $fillable = [

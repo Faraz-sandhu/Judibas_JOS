@@ -42,6 +42,15 @@ public function acceptInvitation(Invitation $invitation)
 
         try {
             DB::transaction(function () use ($invitation) {
+                // The recipient may not yet have task visibility. Resolve only the signed invitation's target.
+                $types=[\App\Modules\Pms\Models\Projects::class,\App\Modules\Pms\Models\Tasks::class,\App\Modules\Pms\Models\Subtasks::class];
+                if(!in_array($invitation->invitable_type,$types,true))throw new \Exception('Invalid invitation target.');
+                $target=$invitation->invitable_type::withoutGlobalScope('visibility')->findOrFail($invitation->invitable_id);
+                $project=$target instanceof \App\Modules\Pms\Models\Projects?$target:($target instanceof \App\Modules\Pms\Models\Tasks?\App\Modules\Pms\Models\Projects::withoutGlobalScope('visibility')->find($target->project_id):\App\Modules\Pms\Models\Projects::withoutGlobalScope('visibility')->find(\App\Modules\Pms\Models\Tasks::withoutGlobalScope('visibility')->findOrFail($target->task_id)->project_id));
+                if($project?->company_id){$platform=DB::table('pms_companies')->where('id',$project->company_id)->value('platform_company_id');$recipient=User::withoutGlobalScopes()->findOrFail($invitation->recipient_id);if(!$recipient->judibas_administrator&&!$recipient->hasRole('admin')&&$recipient->company_id!=$platform&&!DB::table('communication_company_memberships')->where('company_id',$platform)->where('user_id',$recipient->id)->exists())throw new \Exception('The recipient needs access to this company first.');}
+                if($target instanceof \App\Modules\Pms\Models\Tasks)$target->setRelation('project',$project);
+                if($target instanceof \App\Modules\Pms\Models\Subtasks){$parent=\App\Modules\Pms\Models\Tasks::withoutGlobalScope('visibility')->findOrFail($target->task_id);$parent->setRelation('project',$project);$target->setRelation('task',$parent);}
+                $invitation->setRelation('invitable',$target);
                 // Mark invitation as accepted
                 $invitation->update(['accepted_at' => now()]);
 

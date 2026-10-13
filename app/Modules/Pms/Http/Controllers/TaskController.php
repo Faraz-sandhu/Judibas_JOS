@@ -76,14 +76,14 @@ class TaskController extends Controller
         $project = Projects::findOrFail($validated['project_id']);
         $user = Auth::user();
         abort_unless(
-            $user->hasRole('admin') || $project->users()->where('users.id', $user->id)->exists(),
+            \App\Modules\Pms\Services\PmsVisibility::allProjects() || $project->users()->where('users.id', $user->id)->exists(),
             403,
             'You do not have access to this project.'
         );
 
         $assigneeIds = collect($validated['assignee_ids'] ?? (($validated['assignee_id'] ?? null) ? [$validated['assignee_id']] : []))->map(fn ($id) => (int) $id)->unique()->values();
         if ($assigneeIds->isNotEmpty()) {
-            abort_unless($this->eligibleAssignees($user)->whereIn('id', $assigneeIds)->count() === $assigneeIds->count(), 422, 'One or more selected employees cannot be assigned by you.');
+            abort_unless($this->eligibleAssignees($user,$project->company_id)->whereIn('id', $assigneeIds)->count() === $assigneeIds->count(), 422, 'One or more selected employees cannot be assigned by you.');
         }
 
         $start_time = null;
@@ -137,6 +137,9 @@ class TaskController extends Controller
             }
         }
 
+        if(!empty($validated['department_id'])&&$workflow?->department_id)abort_unless((int)$validated['department_id']===(int)$workflow->department_id,422,'Workflow belongs to another department.');
+        if(!empty($validated['department_id']))\App\Modules\Pms\Services\PmsVisibility::department($project->id,$validated['department_id']);
+        if(!empty($validated['sprint_id'])){ $sp=\App\Modules\Pms\Models\Sprint::findOrFail($validated['sprint_id']); abort_unless($sp->department_id==($validated['department_id']??$workflow?->department_id),422,'Sprint belongs to another department.'); }
         // Create the task record
         $task = Tasks::create([
             'title' => $validated['title'],
@@ -284,7 +287,7 @@ class TaskController extends Controller
     {
         PmsAccess::requirePermission(request(), 'task-assign');
         abort_unless($this->canAccessIssue(Auth::user(), $task), 403);
-        return response()->json(['users' => $this->eligibleAssignees(Auth::user())->orderBy('name')->get(['id','name','email','profile_img'])]);
+        return response()->json(['users' => $this->eligibleAssignees(Auth::user(),$task->project?->company_id)->orderBy('name')->get(['id','name','email','profile_img'])]);
     }
 
     public function boardUpdate(Request $request, Tasks $task)
@@ -332,6 +335,7 @@ class TaskController extends Controller
             'original_estimate_minutes' => ['sometimes', 'required', 'integer', 'min:1', 'max:525600'],
         ]);
 
+        if(array_key_exists('department_id',$validated)&&$validated['department_id']!=$task->department_id)abort(422,'Use handoff to move work between departments.');
         $assigneeId = $validated['assignee_id'] ?? null;
         $assigneeIds = $request->has('assignee_ids')
             ? collect($validated['assignee_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values()
@@ -343,10 +347,10 @@ class TaskController extends Controller
         }
 
         if ($assigneeId) {
-            abort_unless($this->eligibleAssignees($user)->whereKey($assigneeId)->exists(), 422, 'The selected employee cannot be assigned by you.');
+            abort_unless($this->eligibleAssignees($user,$task->project?->company_id)->whereKey($assigneeId)->exists(), 422, 'The selected employee cannot be assigned by you.');
         }
         if ($assigneeIds && $assigneeIds->isNotEmpty()) {
-            abort_unless($this->eligibleAssignees($user)->whereIn('id', $assigneeIds)->count() === $assigneeIds->count(), 422, 'One or more selected employees cannot be assigned by you.');
+            abort_unless($this->eligibleAssignees($user,$task->project?->company_id)->whereIn('id', $assigneeIds)->count() === $assigneeIds->count(), 422, 'One or more selected employees cannot be assigned by you.');
         }
 
         if (($validated['status'] ?? null) === 'completed') {
@@ -390,10 +394,11 @@ class TaskController extends Controller
                 );
             }
             $validated['workflow_id'] = $column->workflow_id;
-            $validated['department_id'] = $column->workflow->department_id ?? ($task->project_id ? null : $task->department_id);
+            $validated['department_id'] = $task->department_id ?? $column->workflow->department_id;
             $validated['status'] = $this->legacyStatusForColumn($column);
             $validated['completed_by'] = $column->is_completed ? $user->id : null;
         }
+        if(array_key_exists('sprint_id',$validated)&&$validated['sprint_id']){ $sp=\App\Modules\Pms\Models\Sprint::findOrFail($validated['sprint_id']);abort_unless($sp->department_id==$task->department_id,422,'Sprint belongs to another department.'); }
         DB::transaction(function () use ($task, $validated, $assigneeId, $assigneeIds, $assigneeAction, $request, $user, $oldEstimate, $removedAssigneeIds) {
             $task->update($validated);
 
@@ -451,9 +456,9 @@ class TaskController extends Controller
         ]);
     }
 
-    private function eligibleAssignees(User $actor): Builder
+    private function eligibleAssignees(User $actor,?int $companyId=null): Builder
     {
-        return User::query()
+        return User::query()->where(function($q)use($companyId){\App\Modules\Pms\Services\PmsVisibility::assignees($q,$companyId);})
             ->where('status', 1)
             ->whereDoesntHave('roles', fn (Builder $query) => $query->where('role_key', 'admin'))
             ->when(
@@ -541,18 +546,11 @@ class TaskController extends Controller
 
     private function canAccessIssue(User $user, Tasks $task): bool
     {
-        if ($user->hasRole('admin')) {
+        if (\App\Modules\Pms\Services\PmsVisibility::allProjects()) {
             return true;
         }
 
-        if ($task->department_id && $user->can('department-task-view-all')) {
-            $isDepartmentMember = $user->departments()->where('pms_departments.id', $task->department_id)->exists();
-            if ($user->hasRole('project_manager') || $isDepartmentMember) return true;
-        }
-
-        if ($user->hasRole('project_manager') || $user->hasRole('team_leader')) {
-            return $task->project?->users()->where('users.id', $user->id)->exists() ?? false;
-        }
+        if(\App\Modules\Pms\Services\PmsVisibility::teamTasks()&&in_array($task->department_id,\App\Modules\Pms\Services\PmsVisibility::teamDepartmentIds()))return true;
 
         return $task->users()->where('users.id', $user->id)->exists()
             || $task->subtasks()->whereHas('users', fn ($query) => $query->where('users.id', $user->id))->exists();

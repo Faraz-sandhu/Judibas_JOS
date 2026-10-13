@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class Subtasks extends Model
 {
+    protected static function booted():void {static::addGlobalScope('visibility',fn(\Illuminate\Database\Eloquent\Builder $q)=>\App\Modules\Pms\Services\PmsVisibility::subtasks($q));}
     protected $table = 'pms_subtasks';
     protected $fillable = [
         'task_id',

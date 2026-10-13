@@ -22,6 +22,7 @@ class SprintController extends Controller
         $this->ensureProjectAccess($project);
 
         $validated = $request->validate([
+            'department_id' => ['nullable','integer','exists:pms_departments,id'],
             'name' => ['required', 'string', 'max:120'],
             'goal' => ['nullable', 'string', 'max:1000'],
             'start_date' => ['nullable', 'date'],
@@ -29,6 +30,7 @@ class SprintController extends Controller
             'status' => ['nullable', Rule::in(['planned', 'active'])],
         ]);
 
+        if(!empty($validated['department_id']))\App\Modules\Pms\Services\PmsVisibility::department($project->id,$validated['department_id']);
         $sprint = DB::transaction(function () use ($validated, $project) {
             $status = $validated['status'] ?? 'planned';
 
@@ -75,7 +77,7 @@ class SprintController extends Controller
     private function ensureProjectAccess(Projects $project): void
     {
         $user = \App\Modules\Pms\Services\PmsAuth::user();
-        if (! $user->hasRole('admin') && ! $project->users()->where('users.id', $user->id)->exists()) {
+        if (! \App\Modules\Pms\Services\PmsVisibility::allProjects() && ! $project->users()->where('users.id', $user->id)->exists()) {
             abort(403, 'You do not have access to this project.');
         }
     }

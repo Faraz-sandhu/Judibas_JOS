@@ -60,6 +60,7 @@ class CommunicationManagementController extends Controller
             DB::table('communication_conversations')->where('company_id', $id)->where('kind', 'community')->update(['name' => $v['name'].' announcements']);
         });
 
+        \App\Modules\Pms\Services\PmsVisibility::syncCompanies();
         return response()->json(['id' => $id, 'message' => 'Company community saved.']);
     }
 

@@ -77,11 +77,13 @@ class PmsDeliveryTest extends TestCase {
   DB::table('pms_role_users')->insert(['user_id'=>$user->id,'role_id'=>DB::table('pms_roles')->where('role_key','developer')->value('id')]);
   DB::table('pms_project_user')->insert(['user_id'=>$user->id,'project_id'=>$project]);
   DB::table('pms_task_user')->insert(['user_id'=>$user->id,'task_id'=>$task]);
+  $platform=DB::table('communication_companies')->insertGetId(['name'=>'Visibility Company','created_at'=>now(),'updated_at'=>now()]);
+  $company=DB::table('pms_companies')->insertGetId(['name'=>'Visibility Company','platform_company_id'=>$platform,'status'=>true,'created_at'=>now(),'updated_at'=>now()]);DB::table('pms_projects')->where('id',$project)->update(['company_id'=>$company]);DB::table('communication_company_memberships')->insert(['company_id'=>$platform,'user_id'=>$user->id]);
   $this->withSession(['judibas_admin'=>false])->actingAs($user);
   $this->getJson('/pms/api/my-work')->assertOk()->assertJsonFragment(['title'=>'Assigned parity'])->assertJsonMissing(['title'=>'Hidden parity']);
-  $this->getJson('/pms/api/tasks/'.$hidden)->assertForbidden();
+  $this->getJson('/pms/api/tasks/'.$hidden)->assertNotFound();
   $this->postJson('/pms/api/tasks/'.$task.'/comments',['body'=>'Employee note'])->assertCreated();
-  $this->postJson('/pms/api/timers/start',['task_id'=>$hidden])->assertStatus(400);
+  $this->postJson('/pms/api/timers/start',['task_id'=>$hidden])->assertNotFound();
   $this->postJson('/pms/api/timers/start',['task_id'=>$task])->assertOk();
   $this->postJson('/pms/api/timers/start',['task_id'=>$task])->assertStatus(400);
   $this->postJson('/pms/api/timers/stop',['task_id'=>$task])->assertOk();

@@ -21,6 +21,7 @@ class Projects extends Model
 
     protected static function booted(): void
     {
+        static::addGlobalScope('visibility',fn(Builder $q)=>\App\Modules\Pms\Services\PmsVisibility::projects($q));
         static::saving(function (Projects $project): void {
             $project->name = preg_replace('/\s+/u', ' ', trim((string) $project->name));
             $project->name_key = self::normalizeName($project->name);
@@ -34,6 +35,7 @@ class Projects extends Model
 
     protected $fillable = [
         'company_id',
+        'client_id',
         'name',
         'description',
         'image',
@@ -42,6 +44,8 @@ class Projects extends Model
         'url',
         'attachment',
     ];
+
+    public function client(){return $this->belongsTo(Client::class);}
 
     public function company(): BelongsTo
     {

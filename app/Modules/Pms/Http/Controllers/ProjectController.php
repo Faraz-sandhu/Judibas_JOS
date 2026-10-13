@@ -163,12 +163,10 @@ class ProjectController extends Controller
         PmsAccess::requirePermission(request(), 'project-view');
         $user = Auth::user();
         $userId = Auth::id();
-        if (! $user->hasRole('admin') && ! $user->hasRole('project_manager') && ! $user->hasRole('team_leader')) {
-            return redirect(\App\Modules\Pms\Services\PmsUrls::workspace(['section' => 'my-work']));
-        }
+
         $isIndividualContributor = ! $user->hasRole('admin') && ! $user->hasRole('project_manager') && ! $user->hasRole('team_leader');
         $visibleTasks = function (Builder $query) use ($isIndividualContributor, $userId): void {
-            if ($isIndividualContributor) {
+            if ($isIndividualContributor && !\App\Modules\Pms\Services\PmsVisibility::teamTasks()) {
                 $query->where(fn (Builder $tasks) => $tasks
                     ->whereHas('users', fn (Builder $users) => $users->where('users.id', $userId))
                     ->orWhereHas('subtasks.users', fn (Builder $users) => $users->where('users.id', $userId)));
@@ -204,16 +202,7 @@ class ProjectController extends Controller
                 },
 
             ]);
-        if (! $user->hasRole('admin')) {
-            if ($user->hasRole('project_manager') || $user->hasRole('team_leader')) {
-                $projectsQuery->whereHas('users', fn ($query) => $query->where('users.id', $user->id));
-            } else {
-                $projectsQuery->where(fn (Builder $query) => $query
-                    ->whereHas('users', fn (Builder $users) => $users->where('users.id', $user->id))
-                    ->orWhereHas('tasks.users', fn (Builder $users) => $users->where('users.id', $user->id))
-                    ->orWhereHas('tasks.subtasks.users', fn (Builder $users) => $users->where('users.id', $user->id)));
-            }
-        }
+
         if ($user->hasRole('project_manager') || $user->hasRole('admin') || $user->hasRole('team_leader')) {
             $projectsQuery->whereIn('approval', ['approved', 'pending', 'rejected']);
         } else {
@@ -225,6 +214,7 @@ class ProjectController extends Controller
         if ($request->has('approval') && ! empty($request->approval)) {
             $projectsQuery->where('approval', $request->approval);
         }
+        if($request->filled('client'))$projectsQuery->where('client_id',$request->integer('client'));
         $projects = $projectsQuery->get();
 
         $filteredUsersQuery = User::with('roles');
@@ -252,11 +242,13 @@ class ProjectController extends Controller
         }
 
         $availableWorkflows = Workflow::where('is_active', true)->with('department:id,dept_name')->orderBy('name')->get();
-        $companies = Company::where('status', true)->orderBy('name')->get(['id', 'name']);
+        \App\Modules\Pms\Services\PmsVisibility::syncCompanies();
+        $clients = \App\Modules\Pms\Models\Client::whereIn('company_id',\App\Modules\Pms\Services\PmsVisibility::companyIds())->orderBy('name')->get();
+        $companies = Company::whereIn('id',\App\Modules\Pms\Services\PmsVisibility::companyIds())->where('status', true)->orderBy('name')->get(['id', 'name']);
         $departments = Department::query()->where('status', 1)
             ->when($user->hasRole('team_leader'), fn ($query) => $query->whereHas('users', fn ($users) => $users->where('users.id', $user->id)))
             ->orderBy('dept_name')->get(['id', 'dept_name']);
-        return view('dashboard.projects.index', compact('projects', 'filteredUsers', 'approvedProjects', 'pendingProjects', 'rejectedProjects', 'availableWorkflows', 'companies', 'departments'));
+        return view('dashboard.projects.index', compact('projects', 'filteredUsers', 'approvedProjects', 'pendingProjects', 'rejectedProjects', 'availableWorkflows', 'companies', 'clients', 'departments'));
     }
 
     public function assignProjectToTeamLeaderAndMembers(Request $request)
@@ -447,6 +439,7 @@ class ProjectController extends Controller
                     $fail('A project with this name already exists.');
                 }
             }],
+            'client_id' => [\Illuminate\Validation\Rule::requiredIf(!\App\Modules\Pms\Services\PmsVisibility::unrestricted()),'nullable','integer','exists:pms_clients,id'],
             'company_name' => ['nullable', 'string', 'max:255'],
             'url' => ['nullable', 'url', 'max:2048'],
             'description' => ['nullable', 'string'],
@@ -462,6 +455,8 @@ class ProjectController extends Controller
             'end_date.after_or_equal' => 'End Date must be the same as or later than the Start Date.',
         ]);
 
+        $client = !empty($validatedData['client_id']) ? \App\Modules\Pms\Models\Client::findOrFail($validatedData['client_id']) : null;
+        if($client)abort_unless(in_array($client->company_id,\App\Modules\Pms\Services\PmsVisibility::companyIds()),403);
         try {
             if ($request->hasFile('image')) {
                 $imagePath = $request->file('image')->store('projects', 'public');
@@ -488,11 +483,12 @@ class ProjectController extends Controller
             //     $imageUrl = asset('project.png');
             // }
 
-            $companyId = ! empty($validatedData['company_name'])
+            $companyId = $client?->company_id ?? (! empty($validatedData['company_name'])
                 ? Company::firstOrCreate(['name' => trim($validatedData['company_name'])])->id
-                : null;
+                : null);
             $project = Projects::create([
                 'company_id' => $companyId,
+                'client_id' => $client?->id,
                 'name' => $validatedData['name'],
                 'description' => $validatedData['description'] ?? null,
                 'image' => $imageUrl,
@@ -527,41 +523,42 @@ class ProjectController extends Controller
         }
     }
 
+    public function projectDepartments(Projects $project)
+    {
+        PmsAccess::requirePermission(request(),'project-view');
+        $project->load(['company:id,name','client:id,name','departments:id,dept_name']);
+        if(!\App\Modules\Pms\Services\PmsVisibility::allProjects())$project->setRelation('departments',$project->departments->filter(fn($d)=>$project->tasks()->where('department_id',$d->id)->exists())->values());
+        $hasUnallocatedWork=$project->tasks()->whereNull('department_id')->exists()||$project->sprints()->whereNull('department_id')->exists();
+        return response()->json(['data'=>['project'=>$project,'hasUnallocatedWork'=>$hasUnallocatedWork]]);
+    }
+
     public function show(string $id)
     {
         PmsAccess::requirePermission(request(), 'project-view');
         $user = Auth::user();
-        $project = Projects::with('company:id,name')->findOrFail($id);
+        $project = Projects::with(['company:id,name','client:id,name','departments:id,dept_name'])->findOrFail($id);
 
-        if (! $user->hasRole('admin')) {
+        if (! \App\Modules\Pms\Services\PmsVisibility::allProjects()) {
             if ($project->approval !== 'approved') {
                 $message = 'Project is not approved yet';
 
                 return view('dashboard.custom-pages.message', compact('message'));
             }
 
-            $hasProjectAccess = $project->users()->where('users.id', Auth::id())->exists();
-            if (! $user->hasRole('project_manager') && ! $user->hasRole('team_leader')) {
-                $hasProjectAccess = $hasProjectAccess
-                    || $project->tasks()->whereHas('users', fn (Builder $users) => $users->where('users.id', Auth::id()))->exists()
-                    || $project->tasks()->whereHas('subtasks.users', fn (Builder $users) => $users->where('users.id', Auth::id()))->exists();
-            }
-            if (! $hasProjectAccess) {
-                abort(404);
-            }
+
         }
         // Board tasks are loaded below with the exact sprint and visibility filters.
         // Avoid loading the complete task/subtask tree here a second time.
         if ($user->hasRole('admin') || $user->hasRole('project_manager')) {
             $asignee = User::query()
-                ->where('status', 1)
+                ->where('status', 1)->where(function($q)use($project){\App\Modules\Pms\Services\PmsVisibility::assignees($q,$project->company_id);})
                 ->whereDoesntHave('roles', fn ($query) => $query->where('role_key', 'admin'))
                 ->orderBy('name')
                 ->get(['id', 'name', 'email', 'profile_img']);
         } elseif ($user->hasRole('team_leader')) {
             $teamLeaderDepartmentId = $user->departments->pluck('id');
             $asignee = User::query()
-                ->where('status', 1)
+                ->where('status', 1)->where(function($q)use($project){\App\Modules\Pms\Services\PmsVisibility::assignees($q,$project->company_id);})
                 ->whereDoesntHave('roles', fn ($query) => $query->where('role_key', 'admin'))
                 ->whereHas('departments', fn ($query) => $query->whereIn('pms_departments.id', $teamLeaderDepartmentId))
                 ->orderBy('name')
@@ -570,8 +567,10 @@ class ProjectController extends Controller
             $asignee = null;
         }
 
-        $sprints = $project->sprints()->withCount('tasks')->get();
-        $workflows = $project->workflows()->where('is_active', true)->with(['columns', 'department:id,dept_name'])->orderBy('name')->get();
+        $departmentId = request()->integer('department') ?: null;
+        if($departmentId){\App\Modules\Pms\Services\PmsVisibility::department($project->id,$departmentId);if(!\App\Modules\Pms\Services\PmsVisibility::allProjects())abort_unless($project->tasks()->where('department_id',$departmentId)->exists(),404);}
+        $sprints = $project->sprints()->when($departmentId,fn($q)=>$q->where('department_id',$departmentId))->withCount('tasks')->get();
+        $workflows = $project->workflows()->where('is_active', true)->when($departmentId,fn($q)=>$q->where(fn($w)=>$w->where('department_id',$departmentId)->orWhereNull('department_id')))->with(['columns', 'department:id,dept_name'])->orderBy('name')->get();
         if ($workflows->isEmpty()) {
             $defaultWorkflow = Workflow::where('is_default', true)->where('is_active', true)->with('columns')->first();
             if ($defaultWorkflow) {
@@ -579,7 +578,8 @@ class ProjectController extends Controller
                 $workflows = collect([$defaultWorkflow]);
             }
         }
-        $selectedWorkflow = $workflows->firstWhere('id', (int) request()->query('workflow')) ?? $workflows->first();
+        $selectedWorkflow = $departmentId?($workflows->firstWhere('department_id',$departmentId)??$workflows->first()):($workflows->firstWhere('id',(int)request()->query('workflow'))??$workflows->first());
+        $boardDepartment=$departmentId?Department::findOrFail($departmentId):null;
         $requestedSprint = request()->query('sprint');
         // Do not open an empty active sprint while the project has backlog work.
         // Prefer an active sprint containing tasks; otherwise default to Backlog.
@@ -595,15 +595,11 @@ class ProjectController extends Controller
             $selectedSprint = $activeSprint;
         }
 
+        if($requestedSprint && $requestedSprint!=='backlog')abort_unless($selectedSprint,404,'Sprint does not belong to this department.');
         $boardTasks = Tasks::query()
             ->where('project_id', $project->id)
+            ->when($departmentId,fn($q)=>$q->where('department_id',$departmentId))
             ->when($selectedWorkflow, fn ($query) => $query->where('workflow_id', $selectedWorkflow->id))
-            ->when(
-                ! $user->hasRole('admin') && ! $user->hasRole('project_manager') && ! $user->hasRole('team_leader'),
-                fn (Builder $query) => $query->where(fn (Builder $tasks) => $tasks
-                    ->whereHas('users', fn (Builder $users) => $users->where('users.id', $user->id))
-                    ->orWhereHas('subtasks.users', fn (Builder $users) => $users->where('users.id', $user->id)))
-            )
             ->when($selectedSprint, fn ($query) => $query->where('sprint_id', $selectedSprint->id))
             ->when(! $selectedSprint, fn ($query) => $query->whereNull('sprint_id'))
             ->with(['incomingHandoff.sourceDepartment:id,dept_name', 'outgoingHandoffs.destinationDepartment:id,dept_name', 'users:id,name,profile_img', 'subtasks:id,task_id,status', 'timerLogs:id,task_id,user_id,start_time,end_time'])
@@ -621,26 +617,26 @@ class ProjectController extends Controller
 
         $workloadUsers = User::query()
             ->whereHas('projects', fn ($query) => $query->where('pms_projects.id', $project->id))
-            ->with(['tasks' => fn ($query) => $query->where('project_id', $project->id)
+            ->with(['tasks' => fn ($query) => $query->where('project_id', $project->id)->when($departmentId,fn($q)=>$q->where('department_id',$departmentId))
                 ->when($selectedSprint, fn ($taskQuery) => $taskQuery->where('sprint_id', $selectedSprint->id))
                 ->when(! $selectedSprint, fn ($taskQuery) => $taskQuery->whereNull('sprint_id'))
                 ->select('pms_tasks.id', 'pms_tasks.project_id', 'pms_tasks.sprint_id', 'pms_tasks.title', 'pms_tasks.status')])
             ->withCount([
                 'tasks as project_tasks_count' => fn ($query) => $query->where('project_id', $project->id),
-                'tasks as sprint_tasks_count' => fn ($query) => $query->where('project_id', $project->id)
+                'tasks as sprint_tasks_count' => fn ($query) => $query->where('project_id', $project->id)->when($departmentId,fn($q)=>$q->where('department_id',$departmentId))
                     ->when($selectedSprint, fn ($taskQuery) => $taskQuery->where('sprint_id', $selectedSprint->id))
                     ->when(! $selectedSprint, fn ($taskQuery) => $taskQuery->whereNull('sprint_id')),
             ])
             ->orderBy('name')
             ->get(['id', 'name', 'profile_img']);
 
-        return view('dashboard.projects.tasks', compact('project', 'asignee', 'sprints', 'selectedSprint', 'boardTasks', 'sprintStats', 'workloadUsers', 'workflows', 'selectedWorkflow'));
+        return view('dashboard.projects.tasks', compact('boardDepartment','departmentId','project', 'asignee', 'sprints', 'selectedSprint', 'boardTasks', 'sprintStats', 'workloadUsers', 'workflows', 'selectedWorkflow'));
     }
 
     public function edit(string $id)
     {
         PmsAccess::requirePermission(request(), 'project-edit');
-        $project = Projects::with('company:id,name')->findOrFail($id);
+        $project = Projects::with(['company:id,name','client:id,name','departments:id,dept_name'])->findOrFail($id);
 
         return response()->json(['data' => $project, 'workflow_ids' => $project->workflows()->pluck('pms_workflows.id'), 'department_ids' => $project->departments()->pluck('pms_departments.id')]);
     }
@@ -656,6 +652,7 @@ class ProjectController extends Controller
                     $fail('A project with this name already exists.');
                 }
             }],
+            'client_id' => [\Illuminate\Validation\Rule::requiredIf(!\App\Modules\Pms\Services\PmsVisibility::unrestricted()),'nullable','integer','exists:pms_clients,id'],
             'company_name' => ['nullable', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'url' => ['nullable', 'url', 'max:2048'],
@@ -671,6 +668,12 @@ class ProjectController extends Controller
             'end_date.after_or_equal' => 'End Date must be the same as or later than the Start Date.',
         ]);
 
+        $existing=Projects::findOrFail($id);
+        if($request->boolean('sync_departments')){
+            $removed=$existing->departments()->whereNotIn('pms_departments.id',$validatedData['department_ids']??[])->pluck('pms_departments.id');
+            abort_if($existing->tasks()->whereIn('department_id',$removed)->exists()||$existing->sprints()->whereIn('department_id',$removed)->exists(),422,'Departments containing tasks or sprints cannot be removed from the project.');
+        }
+        if(!empty($validatedData['client_id'])){ $chosen=\App\Modules\Pms\Models\Client::findOrFail($validatedData['client_id']);abort_unless(in_array($chosen->company_id,\App\Modules\Pms\Services\PmsVisibility::companyIds()),403); }
         try {
             if ($request->image != null) {
                 $imagePath = $request->file('image')->store('projects', 'public');
@@ -686,9 +689,15 @@ class ProjectController extends Controller
             }
             // update the
             $project = Projects::findOrFail($id);
+            if(array_key_exists('client_id',$validatedData)){
+                $client=\App\Modules\Pms\Models\Client::findOrFail($validatedData['client_id']);
+                abort_unless(in_array($client->company_id,\App\Modules\Pms\Services\PmsVisibility::companyIds()),403);
+                $project->client_id=$client->id;$project->company_id=$client->company_id;
+            } elseif(!$project->client_id){
             $project->company_id = ! empty($validatedData['company_name'])
                 ? Company::firstOrCreate(['name' => trim($validatedData['company_name'])])->id
                 : null;
+            }
             $project->name = $validatedData['name'];
             $project->description = $validatedData['description'] ?? null;
             if ($request->image != null) {

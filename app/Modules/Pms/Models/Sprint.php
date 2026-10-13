@@ -8,9 +8,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Sprint extends Model
 {
+    protected static function booted():void {static::addGlobalScope('visibility',fn(\Illuminate\Database\Eloquent\Builder $q)=>\App\Modules\Pms\Services\PmsVisibility::sprints($q));}
     protected $table='pms_sprints';
     protected $fillable = [
         'project_id',
+        'department_id',
         'name',
         'goal',
         'start_date',
@@ -23,6 +25,8 @@ class Sprint extends Model
         'start_date' => 'date',
         'end_date' => 'date',
     ];
+
+    public function department(){return $this->belongsTo(Department::class);}
 
     public function project(): BelongsTo
     {

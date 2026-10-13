@@ -14,9 +14,11 @@ class UserProductAccess
   'pms_department_ids'=>'sometimes|array','pms_department_ids.*'=>'integer|distinct|exists:pms_departments,id',
  ];}
  public static function validateSelection(array $v): void {
+  if(in_array('projects',$v['product_slugs'])&&!count($v['company_ids'])) throw \Illuminate\Validation\ValidationException::withMessages(['company_ids'=>'Select at least one company for PMS.']);
   if(in_array('communication',$v['product_slugs'])&&!count($v['company_ids'])) throw \Illuminate\Validation\ValidationException::withMessages(['company_ids'=>'Select at least one company for Communication.']);
   if(in_array('projects',$v['product_slugs'])&&array_key_exists('pms_role_ids',$v)&&!count($v['pms_role_ids'])) throw \Illuminate\Validation\ValidationException::withMessages(['pms_role_ids'=>'Select at least one PMS role.']);
   if(count($v['pms_task_ids']??[])&&!in_array('projects',$v['product_slugs']))throw \Illuminate\Validation\ValidationException::withMessages(['pms_task_ids'=>'Task assignments require PMS access.']);
+  if(count($v['pms_task_ids']??[])&&DB::table('pms_tasks')->join('pms_projects','pms_projects.id','=','pms_tasks.project_id')->join('pms_companies','pms_companies.id','=','pms_projects.company_id')->whereIn('pms_tasks.id',$v['pms_task_ids'])->whereNotNull('platform_company_id')->whereNotIn('platform_company_id',$v['company_ids'])->exists())throw \Illuminate\Validation\ValidationException::withMessages(['pms_task_ids'=>'Task assignments must belong to the selected companies.']);
   foreach($v['group_ids']??[] as $id) if(!in_array('communication',$v['product_slugs'])||!DB::table('communication_conversations')->where('id',$id)->where('kind','group')->whereIn('company_id',$v['company_ids'])->exists()) throw \Illuminate\Validation\ValidationException::withMessages(['group_ids'=>'Groups must belong to selected companies and require Communication access.']);
  }
  /** Called inside the caller's transaction. Product removal preserves historical work and role assignments. */

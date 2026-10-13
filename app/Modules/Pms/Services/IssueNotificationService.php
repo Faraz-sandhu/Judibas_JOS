@@ -136,7 +136,7 @@ class IssueNotificationService
         ];
 
         $recipientIds = $recipientIds->map(fn ($id) => (int) $id)->values();
-        $recipients = User::whereIn('id', $recipientIds)->get();
+        $recipientQuery=User::whereIn('id',$recipientIds);PmsVisibility::assignees($recipientQuery,$task->project?->company_id);$recipients=$recipientQuery->get();$recipientIds=$recipients->pluck('id');
 
         // Persist the in-app notification first. This must never depend on a queue,
         // broadcaster, or mail server being available.

@@ -903,3 +903,74 @@
 @media(prefers-reduced-motion:reduce){.pms-workspace :is(.pms-table button,button.pms-icon-action):is(.action-edit,.action-delete,:has(> .ti-edit),:has(> .fa-pen-to-square),:has(> .ti-trash),:has(> .fa-trash)){transition:none;transform:none!important}}
 
 .pms-workspace .pms-role-permission-summary{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--pms-border);background:var(--pms-primary-soft);color:var(--pms-primary);padding:7px 10px;border-radius:7px;font-size:12px;white-space:nowrap}.pms-workspace .pms-role-permission-summary span{font-size:11px;margin-left:8px}.pms-workspace .pms-role-permission-preview{display:grid;grid-template-columns:1fr 1fr;gap:10px;max-height:55vh;overflow:auto}.pms-workspace .pms-role-permission-preview>span{display:flex;align-items:center;gap:9px;background:var(--pms-primary-soft);border:1px solid var(--pms-border);border-radius:7px;padding:10px;font-size:12px}.pms-workspace .pms-role-permission-preview .ti{color:var(--pms-primary)}.pms-workspace .pms-role-permission-editor{max-height:55vh;overflow:auto;border:1px solid var(--pms-border);border-radius:9px;padding:16px}.pms-workspace .pms-role-permission-editor .check{padding:8px;border-radius:6px;background:var(--pms-page)}@media(max-width:640px){.pms-workspace .pms-role-permission-preview{grid-template-columns:1fr}}
+
+.pms-hierarchy-nav{padding:4px 12px 16px;font-size:13px}.pms-hierarchy-nav details{margin:5px 0}.pms-hierarchy-nav summary{display:flex;gap:8px;align-items:center;cursor:pointer;padding:9px 6px;border-radius:6px;color:var(--pms-muted,#a5a8bb)}.pms-hierarchy-nav summary:hover{background:rgba(115,103,240,.12)}.pms-hierarchy-nav summary::after{content:'\203a';margin-left:auto}.pms-hierarchy-nav details[open]>summary::after{transform:rotate(90deg)}.pms-hierarchy-nav details details{margin-left:12px;border-left:1px solid rgba(115,103,240,.18);padding-left:8px}.pms-hierarchy-nav button{border:0;background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit;min-width:0;overflow-wrap:anywhere}.pms-hierarchy-nav .pms-hierarchy-department{display:flex;gap:8px;padding:8px;color:#7367f0}.pms-hierarchy-heading{display:flex;justify-content:space-between;margin-bottom:24px}.pms-department-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:18px}.pms-department-tiles>button{display:flex;flex-direction:column;align-items:flex-start;gap:14px;background:var(--pms-surface);color:inherit;border:1px solid var(--pms-border,#2f3349);padding:24px;border-radius:12px;cursor:pointer;transition:transform .15s,border-color .15s}.pms-department-tiles>button:hover{transform:translateY(-3px);border-color:#7367f0}.pms-department-tiles i{font-size:28px;color:#7367f0}.pms-department-tiles span{color:#7367f0;font-size:13px}
+
+.pms-hierarchy-nav .pms-hierarchy-department.active{background:var(--pms-primary-soft);border-radius:6px}
+
+/* Company -> client -> project -> department tree. */
+.pms-hierarchy-nav summary::after{display:none}.pms-hierarchy-nav details{margin:0}.pms-hierarchy-nav details details{margin-left:0;border:0;padding-left:0}.pms-hierarchy-nav summary{gap:5px;padding:8px 5px;min-height:38px}.pms-hierarchy-nav summary::-webkit-details-marker{display:none}.pms-hierarchy-nav .pms-tree-label{flex:1;min-width:0;overflow-wrap:anywhere;text-align:left}.pms-hierarchy-nav .pms-tree-eye{display:inline-flex;align-items:center;justify-content:center;flex:0 0 26px;width:26px;height:28px;border-radius:5px;color:var(--pms-muted);padding:0}.pms-hierarchy-nav .pms-tree-eye:hover,.pms-hierarchy-nav .pms-tree-eye:focus-visible{background:var(--pms-primary-soft);color:var(--pms-primary)}.pms-tree-eye .ti{font-size:17px}.pms-tree-chevron{flex:0 0 20px;font-size:20px;transition:transform .15s}.pms-hierarchy-nav details[open]>summary>.pms-tree-chevron{transform:rotate(90deg)}.pms-hierarchy-nav .pms-tree-children{margin-left:10px;padding-left:13px;border-left:1px solid var(--pms-border)}.pms-hierarchy-nav .pms-tree-node{position:relative}.pms-hierarchy-nav .pms-tree-node::before{content:'';position:absolute;left:-13px;top:19px;width:13px;border-top:1px solid var(--pms-border);pointer-events:none}.pms-hierarchy-nav .pms-hierarchy-department{width:100%;min-height:38px;padding:8px 4px;align-items:center;font-size:12px}.pms-hierarchy-nav .pms-hierarchy-department>span{min-width:0;overflow-wrap:anywhere}.pms-hierarchy-nav .pms-tree-company{margin-bottom:5px}.pms-hierarchy-filters{display:flex;gap:14px;flex-wrap:wrap}.pms-hierarchy-filters>label{display:flex;flex-direction:column;gap:6px;flex:1 1 210px}.pms-hierarchy-filters select{width:100%}.pms-hierarchy-card-labels{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px}.pms-hierarchy-card-labels .badge{max-width:100%;white-space:normal;text-align:left}
+
+.pms-hierarchy-nav .pms-tree-node:last-child::after{content:'';position:absolute;left:-14px;top:20px;bottom:0;width:2px;background:var(--pms-surface);pointer-events:none}
+
+/* Keep hierarchy rows compact while title attributes expose the complete name. */
+.pms-hierarchy-nav .pms-tree-label{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;overflow-wrap:normal}
+.pms-hierarchy-nav .pms-hierarchy-department>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;overflow-wrap:normal}
+.pms-hierarchy-nav .pms-tree-chevron,.pms-hierarchy-nav .pms-tree-eye{flex-shrink:0}
+
+.pms-hierarchy-heading{align-items:flex-start;gap:20px;flex-wrap:wrap}
+.pms-hierarchy-heading>.button{align-self:flex-start;flex:0 0 auto;min-height:38px;padding:8px 14px;white-space:nowrap;border-radius:6px}
+
+.pms-hierarchy-nav .pms-client-workspace>summary{font-size:14px;padding:10px 8px;gap:10px;min-height:42px;color:var(--pms-text)}
+.pms-hierarchy-nav .pms-client-workspace>summary.active{background:var(--pms-primary-soft);color:var(--pms-primary)}
+.pms-client-workspace-content{padding-top:6px}
+
+/* Connect the entire workspace tree, including the top-level companies. */
+.pms-hierarchy-nav .pms-client-workspace-content.pms-tree-children{padding-top:0;margin-top:6px;margin-left:10px;padding-left:13px}
+.pms-hierarchy-nav .pms-tree-company>summary{padding-left:4px}
+.pms-sidebar .admin-tabs .pms-hierarchy-nav button{font-size:inherit;padding:0;background:transparent;border-radius:0}
+.pms-sidebar .admin-tabs .pms-hierarchy-nav .pms-tree-eye{padding:0;width:26px;height:28px;border-radius:5px;display:inline-flex;text-align:center}
+.pms-sidebar .admin-tabs .pms-hierarchy-nav .pms-tree-eye:hover{background:var(--pms-primary-soft);color:var(--pms-primary)}
+.pms-sidebar .admin-tabs .pms-hierarchy-nav .pms-hierarchy-department{display:flex;padding:8px 4px;border-radius:6px}
+.pms-sidebar .admin-tabs .pms-hierarchy-nav .pms-hierarchy-department.active{background:var(--pms-primary-soft);color:var(--pms-primary)}
+
+/* Keep the expanded navigation scrollable without a visible scrollbar track. */
+.pms-workspace .pms-sidebar,.pms-workspace .pms-menu-scroll{scrollbar-width:none;-ms-overflow-style:none;overflow-x:hidden}
+.pms-workspace .pms-sidebar::-webkit-scrollbar,.pms-workspace .pms-menu-scroll::-webkit-scrollbar{display:none;width:0;height:0}
+
+/* Companies use the full sidebar width; the tree starts below each company. */
+.pms-hierarchy-nav .pms-client-workspace-content{margin:6px 0 0;padding:0;border:0;min-width:0}
+.pms-hierarchy-nav .pms-tree-company{width:100%;min-width:0}
+.pms-hierarchy-nav .pms-tree-company>summary{padding-left:5px}
+.pms-sidebar .admin-tabs>.pms-hierarchy-nav{width:100%;min-width:0;box-sizing:border-box}
+.pms-hierarchy-nav summary{min-width:0}
+/* Keep report controls and pagination outside the wide results scroll region. */
+.pms-workspace .pms-report-table-card{overflow:visible;min-width:0}
+.pms-workspace .pms-report-table-scroll{max-width:100%;overflow-x:auto;overscroll-behavior-x:contain}
+.pms-workspace .pms-report-table-scroll:focus-visible{outline:2px solid var(--pms-primary);outline-offset:-2px}
+.pms-workspace .pms-mobile-toggle,.pms-workspace .pms-mobile-close,.pms-workspace .pms-mobile-backdrop{display:none}
+@media(max-width:900px){
+ .pms-workspace{display:block;grid-template-columns:minmax(0,1fr)}
+ .pms-workspace .pms-page{width:100%;min-width:0;padding:12px}
+ .pms-workspace .pms-topbar{padding:12px;gap:10px}
+ .pms-workspace .pms-mobile-toggle,.pms-workspace .pms-mobile-close{display:inline-flex}
+ .pms-workspace .pms-mobile-close{position:absolute;top:12px;right:10px;padding:6px;z-index:1}
+ .pms-workspace .pms-sidebar{position:fixed;inset:0 auto 0 0;top:0;width:min(290px,85vw);height:100dvh;z-index:1301;transform:translateX(-100%);visibility:hidden;transition:transform .2s ease,visibility .2s;padding:18px 12px 0;box-shadow:8px 0 30px #0004}
+ .pms-workspace .pms-sidebar.is-mobile-open{transform:translateX(0);visibility:visible}
+ .pms-workspace .pms-mobile-backdrop{display:block;position:fixed;inset:0;background:#0008;border:0;border-radius:0;z-index:1300}
+ .pms-workspace .pms-sidebar .admin-tabs{flex-direction:column;overflow:visible}
+ .pms-workspace .pms-sidebar .menu-header,.pms-workspace .pms-products-link{display:block}
+ .pms-workspace .pms-brand{padding:0 34px 18px 8px;font-size:18px}
+ .pms-workspace .pms-datatable-search{flex-wrap:wrap;min-width:0;max-width:100%}
+ .pms-workspace .pms-datatable-search input{max-width:100%}
+ .pms-workspace .pms-report-filters .editor-actions>label{min-width:0;flex:1 1 140px}
+ .pms-workspace .pms-report-filters :is(input,select){max-width:100%;width:100%}
+ .pms-workspace .pms-department-performance{padding:16px!important}
+ .pms-workspace .pms-department-performance .d-flex{flex-wrap:wrap;gap:6px}
+}
+@media(prefers-reduced-motion:reduce){.pms-workspace .pms-sidebar{transition:none}}
+/* The Judibas header scrolls away; the sticky desktop sidebar must then fill the viewport. */
+@media(min-width:901px){
+ .pms-workspace .pms-sidebar{height:100vh;height:100dvh;align-self:start;top:0}
+ .pms-workspace{background:linear-gradient(to right,var(--pms-surface) 260px,var(--pms-page) 260px)}
+}

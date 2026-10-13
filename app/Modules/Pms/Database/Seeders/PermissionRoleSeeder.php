@@ -100,6 +100,7 @@ class PermissionRoleSeeder extends Seeder
 
             // Project Manager
             'Project Manager' => Permission::whereIn('permission_key', [
+                'client-view','client-add','client-edit','client-trash','project-view-all',
                 'dashboard-view',
                 'simple-dashboard-view',
                 'team-reporting-dashboard',
@@ -238,5 +239,6 @@ class PermissionRoleSeeder extends Seeder
         $departmentAll = Permission::where('permission_key', 'department-task-view-all')->value('id');
         if ($departmentAssigned) Role::query()->each(fn (Role $role) => $role->permissions()->syncWithoutDetaching([$departmentAssigned]));
         if ($departmentAll) Role::whereIn('role_key', ['admin','project_manager','team_leader'])->each(fn (Role $role) => $role->permissions()->syncWithoutDetaching([$departmentAll]));
+        $teamView=Permission::where('permission_key','task-view-team')->value('id');if($teamView)Role::where('role_key','team_leader')->each(fn(Role $role)=>$role->permissions()->syncWithoutDetaching([$teamView]));
     }
 }
