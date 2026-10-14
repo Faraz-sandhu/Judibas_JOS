@@ -11,7 +11,7 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
-    ->withCommands([\App\Modules\Pms\Console\Commands\DeleteApprovedTasks::class,\App\Modules\Pms\Console\Commands\SendTaskReminders::class])
+    ->withCommands([\App\Modules\Pms\Console\Commands\DeleteApprovedTasks::class,\App\Modules\Pms\Console\Commands\SendTaskReminders::class,\App\Console\Commands\DatabaseBackup::class])
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->trimStrings(except: ['offer.sdp', 'answer.sdp']);
         $middleware->web(append: [\App\Http\Middleware\ApplyPlatformSettings::class, NotifyCommunicationChanges::class]);

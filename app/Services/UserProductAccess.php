@@ -8,12 +8,16 @@ class UserProductAccess
  public static function rules(): array {return [
   'product_slugs'=>'required|array|min:1','product_slugs.*'=>['required','string','distinct',Rule::in(array_column(config('judibas.products'),'slug'))],
   'company_ids'=>'present|array|max:100','company_ids.*'=>'integer|distinct|exists:communication_companies,id',
+  'canteen_role'=>'sometimes|in:employee,admin,kitchen,cashier',
+  'canteen_level_ids'=>'sometimes|array|max:100','canteen_level_ids.*'=>'nullable|integer|exists:canteen_levels,id',
   'communication_admin'=>'sometimes|boolean','group_ids'=>'sometimes|array|max:100','group_ids.*'=>'integer|distinct|exists:communication_conversations,id',
   'pms_task_ids'=>'sometimes|array|max:100','pms_task_ids.*'=>'integer|distinct|exists:pms_tasks,id',
   'pms_role_ids'=>'sometimes|array','pms_role_ids.*'=>'integer|distinct|exists:pms_roles,id',
   'pms_department_ids'=>'sometimes|array','pms_department_ids.*'=>'integer|distinct|exists:pms_departments,id',
  ];}
  public static function validateSelection(array $v): void {
+  foreach($v['canteen_level_ids']??[] as $company=>$level)if($level!==null&&$level!==''){if(!in_array('canteen',$v['product_slugs'])||!in_array($company,$v['company_ids'])||!DB::table('canteen_levels')->where('id',$level)->where('company_id',$company)->where('active',true)->exists())throw \Illuminate\Validation\ValidationException::withMessages(['canteen_level_ids'=>'Choose an active benefit level belonging to each selected company.']);}
+  if(in_array('canteen',$v['product_slugs'])&&!count($v['company_ids'])) throw \Illuminate\Validation\ValidationException::withMessages(['company_ids'=>'Select at least one company for Canteen.']);
   if(in_array('projects',$v['product_slugs'])&&!count($v['company_ids'])) throw \Illuminate\Validation\ValidationException::withMessages(['company_ids'=>'Select at least one company for PMS.']);
   if(in_array('communication',$v['product_slugs'])&&!count($v['company_ids'])) throw \Illuminate\Validation\ValidationException::withMessages(['company_ids'=>'Select at least one company for Communication.']);
   if(in_array('projects',$v['product_slugs'])&&array_key_exists('pms_role_ids',$v)&&!count($v['pms_role_ids'])) throw \Illuminate\Validation\ValidationException::withMessages(['pms_role_ids'=>'Select at least one PMS role.']);
@@ -37,6 +41,12 @@ class UserProductAccess
   } elseif(!$merge) $user->communication_admin=false;
   $user->save();
   if(!$merge) DB::table('communication_members')->where('user_id',$user->id)->whereIn('conversation_id',DB::table('communication_conversations')->where('kind','group')->whereNotIn('company_id',CommunicationAccess::companies($user->id))->select('id'))->delete();
+  if(in_array('canteen',$slugs))foreach($v['company_ids'] as $company){
+   $existing=DB::table('canteen_profiles')->where('user_id',$user->id)->where('company_id',$company)->first();$changes=['updated_at'=>now()];if(array_key_exists('canteen_role',$v))$changes['role']=$v['canteen_role'];
+   if(array_key_exists($company,$v['canteen_level_ids']??[]))$changes['level_id']=$v['canteen_level_ids'][$company]?:null;
+   if(!$existing)DB::table('canteen_profiles')->insert($changes+['user_id'=>$user->id,'company_id'=>$company,'role'=>'employee','eligible'=>true,'created_at'=>now()]);else DB::table('canteen_profiles')->where('id',$existing->id)->update($changes);
+   if(request()->hasSession()&&(!$existing||isset($changes['role'])&&$existing->role!==$changes['role']||array_key_exists('level_id',$changes)&&$existing->level_id!=$changes['level_id']))\App\Modules\Canteen\Services\CanteenAccess::audit(request(),$company,'employee.access-assigned',['user_id'=>$user->id,'previous_role'=>$existing->role??null,'role'=>$changes['role']??$existing->role??'employee','previous_level_id'=>$existing->level_id??null,'level_id'=>array_key_exists('level_id',$changes)?$changes['level_id']:($existing->level_id??null)]);
+  }
   if(in_array('projects',$slugs)) {
    $pms=\App\Modules\Pms\Models\User::withoutGlobalScopes()->findOrFail($user->id);
    foreach($v['pms_task_ids']??[] as $taskId){$task=\App\Modules\Pms\Models\Tasks::findOrFail($taskId);$task->users()->syncWithoutDetaching([$user->id=>['assigned_by'=>null]]);$task->project?->users()->syncWithoutDetaching([$user->id=>['assigned_by'=>null]]);}

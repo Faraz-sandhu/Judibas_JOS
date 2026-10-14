@@ -30,6 +30,9 @@ Route::post('/admin/settings', [PortalController::class, 'save']);
 Route::post('/admin/logout', [PortalController::class, 'logout']);
 Route::get('/admin/api', [AdminController::class, 'data']);
 Route::get('/admin/api/platform-settings', [\App\Http\Controllers\PlatformSettingsController::class, 'index']);
+Route::get('/admin/api/platform-settings/backups', [\App\Http\Controllers\BackupSettingsController::class, 'show']);
+Route::post('/admin/api/platform-settings/backups', [\App\Http\Controllers\BackupSettingsController::class, 'save']);
+Route::post('/admin/api/platform-settings/backups/run', [\App\Http\Controllers\BackupSettingsController::class, 'run']);
 Route::post('/admin/api/platform-settings/mail', [\App\Modules\Pms\Http\Controllers\MailSettingController::class, 'update']);
 Route::post('/admin/api/platform-settings/mail/test', [\App\Modules\Pms\Http\Controllers\MailSettingController::class, 'test']);
 Route::post('/admin/api/platform-settings/realtime', [\App\Modules\Pms\Http\Controllers\RealtimeSettingController::class, 'update']);
@@ -126,3 +129,5 @@ Route::post('/broadcasting/auth/batch', function (Request $r) {
 });
 
 require __DIR__.'/pms.php';
+
+require __DIR__.'/canteen.php';
