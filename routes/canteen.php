@@ -17,3 +17,9 @@ Route::post('/canteen/api/setup',[CatalogController::class,'setup']);
 Route::get('/canteen/api/reports/export/{format}',[OrderController::class,'export']);
 
 Route::get('/canteen/api/stock',[CatalogController::class,'stock']);
+Route::post('/canteen/api/broadcasting/auth',function(\Illuminate\Http\Request $r){
+ $v=$r->validate(['socket_id'=>'required|string|max:100','channel_name'=>'required|string|max:200']);
+ abort_unless(preg_match('/^private-canteen\.company\.(\d+)$/',$v['channel_name'],$m),403);
+ \App\Modules\Canteen\Services\CanteenAccess::requireRole($r,(int)$m[1],['admin','kitchen','cashier']);
+ return \Illuminate\Support\Facades\Broadcast::connection()->auth($r);
+});
