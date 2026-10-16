@@ -977,3 +977,14 @@
 .pms-workspace .pms-deadlines-view-all{display:block;text-align:right;font-size:13px;margin:0 0 10px;color:var(--pms-primary)}
 .pms-workspace .pms-hierarchy-nav .pms-client-workspace>summary{color:var(--pms-muted);font-weight:400}
 .pms-workspace .pms-hierarchy-nav .pms-client-workspace>summary:is(.active,:hover){color:var(--pms-primary)}
+
+/* Keep the selected client visible above its project portfolio. */
+.pms-workspace .pms-project-list .pms-table-heading.pms-project-context-heading{justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap}
+.pms-project-context{flex:1;min-width:0}
+.pms-project-context>small{display:block;color:var(--pms-muted);font-size:10px;letter-spacing:.6px;margin-bottom:7px}
+.pms-workspace .pms-project-list .pms-project-context>h2{font-size:23px;line-height:1.3;margin:0;overflow-wrap:anywhere}
+.pms-project-context>p{font-size:13px;color:var(--pms-muted);line-height:1.6;margin:8px 0 0}
+.pms-project-context-heading>.button{flex-shrink:0}
+@media(max-width:550px){.pms-project-context{flex-basis:100%}.pms-workspace .pms-project-list .pms-project-context>h2{font-size:21px}}
+
+@media(max-width:550px){.pms-workspace .pms-project-list .pms-table-scroll{max-width:100%;overflow-x:auto}}
