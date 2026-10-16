@@ -988,3 +988,20 @@
 @media(max-width:550px){.pms-project-context{flex-basis:100%}.pms-workspace .pms-project-list .pms-project-context>h2{font-size:21px}}
 
 @media(max-width:550px){.pms-workspace .pms-project-list .pms-table-scroll{max-width:100%;overflow-x:auto}}
+
+/* Client portfolio: project cards followed by the selected project's departments. */
+.pms-workspace .pms-project-list{overflow:visible}
+.pms-project-department-panel{margin-top:26px;padding:26px;border:1px solid var(--pms-border);border-radius:14px;background:var(--pms-surface);scroll-margin-top:24px}
+.pms-project-department-heading{display:flex;justify-content:space-between;align-items:start;gap:20px;flex-wrap:wrap;margin-bottom:24px}
+.pms-project-department-heading>div{flex:1;min-width:0}
+.pms-project-department-heading small{font-size:10px;letter-spacing:.7px;color:var(--pms-primary)}
+.pms-project-department-heading h3{font-size:21px;margin:9px 0;overflow-wrap:anywhere}
+.pms-project-department-heading p{color:var(--pms-muted);font-size:13px;line-height:1.7;margin:0}
+.pms-project-department-heading>.button{flex-shrink:0;align-self:start}
+.pms-project-board-context{display:flex;align-items:center;flex-wrap:wrap;gap:16px;margin-bottom:22px}
+.pms-project-board-context>span{font-size:12px;color:var(--pms-muted);overflow-wrap:anywhere}
+.pms-project-grid-empty{padding:45px 20px;text-align:center;color:var(--pms-muted)}
+.pms-project-grid-empty>.ti{font-size:32px;color:var(--pms-primary)}
+.pms-project-grid-empty>h3{font-size:17px;margin:15px 0 10px;color:var(--pms-text)}
+.pms-project-grid-empty>p{font-size:13px;margin:0}
+@media(max-width:550px){.pms-project-department-panel{padding:18px}.pms-project-department-panel .pms-department-tiles{grid-template-columns:1fr}.pms-project-department-heading h3{font-size:19px}.pms-project-department-heading>div{flex-basis:100%}}
