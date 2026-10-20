@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import DaymarkAdministration from './modules/daymark/DaymarkAdministration.vue';
 import AdminDialog from './AdminDialog.vue';
 import PlatformSettings from './PlatformSettings.vue';
 import UserAccessFields from './UserAccessFields.vue';
@@ -8,13 +9,13 @@ import CommunicationManagement from './modules/communication/CommunicationManage
 
 const props=defineProps<{communicationModule?:boolean;superAdmin?:boolean;name:string;tagline:string;logo:string|null;csrf?:string;success?:string|null;errors?:string[]}>();
 type Row=Record<string,any>;
-const data=ref<Row|null>(null), tab=ref(props.communicationModule||window.location.hash==='#users'?'Users':({'#settings':'Settings','#invitations':'Invitations','#communication':'Communication','#companies':'Companies'} as Record<string,string>)[window.location.hash]||'Dashboard'), editor=ref<Row|null>(null), error=ref(props.errors?.join(' ')||''), message=ref(props.success||''), busy=ref(false);
+const data=ref<Row|null>(null), tab=ref(props.communicationModule||window.location.hash==='#users'?'Users':({'#settings':'Settings','#invitations':'Invitations','#communication':'Communication','#companies':'Companies','#daymark-setup':'Daymark setup'} as Record<string,string>)[window.location.hash]||'Dashboard'), editor=ref<Row|null>(null), error=ref(props.errors?.join(' ')||''), message=ref(props.success||''), busy=ref(false);
 const tabs=props.communicationModule?['Users']:['Dashboard','Blogs','Website','Products','Users','Invitations','Settings','Branding'];
 const invitationOpen=ref(false);const userSearch=ref(''),userStatus=ref('all'),userProduct=ref(''),userPage=ref(1);const pageSize=15;
 const userRows=computed(()=>data.value?.users.filter((u:Row)=>[u.name,u.email,...(u.company_ids||[]).map((id:number)=>data.value?.companies.find((c:Row)=>c.id===id)?.name||'')].join(' ').toLowerCase().includes(userSearch.value.toLowerCase())&&(userStatus.value==='all'||!!u.is_active===(userStatus.value==='active'))&&(!userProduct.value||u.product_slugs.includes(userProduct.value)))||[]);
 const userPages=computed(()=>Math.max(1,Math.ceil(userRows.value.length/pageSize)));const pagedUsers=computed(()=>userRows.value.slice((userPage.value-1)*pageSize,userPage.value*pageSize));watch([userSearch,userStatus,userProduct],()=>userPage.value=1);watch(userPages,n=>userPage.value=Math.min(userPage.value,n));
 const superAdmin=computed(()=>props.superAdmin??window.portal.admin);
-const navigationGroups=[{label:'Workspace',items:['Dashboard','Products',...(superAdmin.value?['Settings']:[])]},{label:'People & access',items:['Companies','Users','Invitations']},{label:'Website',items:['Blogs','Website',...(superAdmin.value?['Branding']:[])]}];
+const navigationGroups=[{label:'Workspace',items:['Dashboard','Products',...(superAdmin.value?['Settings']:[])]},{label:'People & access',items:['Companies','Users','Invitations','Daymark setup']},{label:'Website',items:['Blogs','Website',...(superAdmin.value?['Branding']:[])]}];
 async function request(url:string,method='GET',body?:Row){
 const response=await fetch(url,{method,headers:{Accept:'application/json','Content-Type':'application/json','X-CSRF-TOKEN':props.csrf||''},body:body?JSON.stringify(body):undefined});
 const result=await response.json();
@@ -23,10 +24,10 @@ return result;
 }
 async function load(){try{data.value=await request(props.communicationModule?'/communication/api/users':'/admin/api');}catch(e){error.value=(e as Error).message;}}
 if(!props.communicationModule&&window.location.hash==='#roles')window.location.replace('/pms?section=roles');
-function hashChanged(){if(window.location.hash==='#roles'){window.location.assign('/pms?section=roles');return;}const target=({'#settings':'Settings','#users':'Users','#invitations':'Invitations','#communication':'Communication','#companies':'Companies'} as Record<string,string>)[window.location.hash];if(!props.communicationModule&&target)select(target);}
+function hashChanged(){if(window.location.hash==='#roles'){window.location.assign('/pms?section=roles');return;}const target=({'#settings':'Settings','#users':'Users','#invitations':'Invitations','#communication':'Communication','#companies':'Companies','#daymark-setup':'Daymark setup'} as Record<string,string>)[window.location.hash];if(!props.communicationModule&&target)select(target);}
 onMounted(()=>{void load();window.addEventListener('hashchange',hashChanged);});
 onUnmounted(()=>window.removeEventListener('hashchange',hashChanged));
-function select(value:string){invitationOpen.value=false;if(!props.communicationModule)history.replaceState(null,'',location.pathname+location.search+(value==='Settings'?'#settings':value==='Users'?'#users':value==='Invitations'?'#invitations':value==='Communication'?'#communication':value==='Companies'?'#companies':value==='Roles & permissions'?'#roles':''));tab.value=value;editor.value=null;error.value='';message.value='';}
+function select(value:string){invitationOpen.value=false;if(!props.communicationModule)history.replaceState(null,'',location.pathname+location.search+(value==='Daymark setup'?'#daymark-setup':value==='Settings'?'#settings':value==='Users'?'#users':value==='Invitations'?'#invitations':value==='Communication'?'#communication':value==='Companies'?'#companies':value==='Roles & permissions'?'#roles':''));tab.value=value;editor.value=null;error.value='';message.value='';}
 function edit(row?:Row){
 error.value='';message.value='';
 if(row){const copy:Row=JSON.parse(JSON.stringify(row));if(tab.value==='Users'){if(!superAdmin.value)delete copy.judibas_administrator;copy.password='';copy.canteen_role||='employee';copy.canteen_level_ids||={};copy.company_ids=copy.company_ids||[copy.company_id].filter(Boolean);copy.pms_role_ids||=[];copy.pms_department_ids||=[];if(props.communicationModule)copy.product_slugs=copy.product_slugs.filter((slug:string)=>slug==='communication');}editor.value=copy;return;}
@@ -75,6 +76,7 @@ try{await request((props.communicationModule?'/communication/api/':'/admin/api/'
 
 <section v-if="tab==='Communication'&&!communicationModule"><div class="admin-section-heading"><div><h2>Communication management</h2><p class="muted">Manage groups, community announcements and status updates. Shared companies, users and invitations are under People & access.</p></div><a class="button primary" href="/communication">Open chats</a></div><div class="editor-actions"><a class="button" href="/communication?section=Status">Status updates</a><a v-if="superAdmin" class="button" href="/communication?action=review">Review conversations</a><a v-if="superAdmin" class="button" href="/communication?action=audit">Review log</a></div><CommunicationManagement view="communities" :csrf="csrf"/></section>
 <section v-if="tab==='Companies'&&!communicationModule"><CommunicationManagement view="companies" :csrf="csrf" @changed="load"/></section>
+<DaymarkAdministration v-if="tab==='Daymark setup'&&!communicationModule" :data="data" :csrf="csrf" @changed="load"/>
 <PlatformInvitations v-if="tab==='Invitations'&&!communicationModule" :csrf="csrf" :data="data" :start-open="invitationOpen"/>
 <PlatformSettings v-if="tab==='Settings'&&!communicationModule&&superAdmin" :csrf="csrf"/>
 <template v-if="tab==='Branding'&&superAdmin"><h2>Branding</h2><form action="/admin/settings" method="post" enctype="multipart/form-data" class="settings-form"><input type="hidden" name="_token" :value="csrf"><label>Project name<input name="name" :value="name" maxlength="80" required></label><label>Homepage introduction<input name="tagline" :value="tagline" maxlength="160" required></label><label>Company logo<input name="logo" type="file" accept="image/png,image/jpeg,image/webp"><small>PNG, JPEG or WebP. Up to 2 MB.</small></label><img v-if="logo" :src="logo" alt="Current company logo" class="admin-logo"><button class="button primary">Save branding</button></form></template>

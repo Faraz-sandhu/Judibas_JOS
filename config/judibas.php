@@ -4,6 +4,7 @@ return [
     'admin_email' => env('JUDIBAS_ADMIN_EMAIL', 'admin@gmail.com'),
     'admin_password_hash' => env('JUDIBAS_ADMIN_PASSWORD_HASH'),
     'products' => [
+        ['slug'=>'daymark','workspace'=>'/daymark','name'=>'Daymark','category'=>'Collaboration','icon'=>'D','color'=>'#6c5ce7','description'=>'Daily progress reports, team reviews and monthly reporting','features'=>['Daily reports and private drafts','Manager reviews and feedback','Monthly summaries and exports','Reporting assignments and permissions']],
         ['slug' => 'cv-bank', 'workspace' => '/cv-bank', 'name' => 'CV Bank', 'category' => 'Human resources', 'icon' => 'CV', 'color' => '#2563eb', 'description' => 'Collect, organise and review candidates by department and job', 'features' => ['Career applications', 'Job listings', 'Department pipelines', 'Private CV storage']],
         ['slug' => 'canteen', 'workspace' => '/canteen', 'name' => 'Canteen', 'category' => 'Operations', 'icon' => 'C', 'color' => '#d97706', 'description' => 'Employee meals, benefits, ordering and canteen operations', 'features' => ['Employee benefits', 'Menu and allowances', 'Kitchen and cashier', 'Consumption reports']],
         ['slug' => 'communication', 'workspace' => '/communication', 'name' => 'Communication', 'category' => 'Collaboration', 'icon' => 'C', 'color' => '#16a085', 'description' => 'Connect your company with chats, communities, and announcements', 'features' => ['Direct and group messages', 'Company communities', 'File sharing', 'Admin stories']],

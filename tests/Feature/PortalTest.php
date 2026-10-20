@@ -19,9 +19,10 @@ class PortalTest extends TestCase
 
     public function test_catalogue_and_product_pages(): void
     {
-        $this->get('/')->assertOk()->assertViewHas('portal', fn ($p) => count($p['products']) === 17);
+        $this->get('/')->assertOk()->assertViewHas('portal', fn ($p) => count($p['products']) === count(config('judibas.products')) && collect($p['products'])->contains('slug', 'daymark'));
         $this->get('/products/crm')->assertOk()->assertViewHas('portal', fn ($p) => $p['product']['slug'] === 'crm');
         $this->get('/products/canteen')->assertOk()->assertViewHas('portal', fn ($p) => $p['product']['workspace'] === '/canteen');
+        $this->get('/products/daymark')->assertOk()->assertViewHas('portal', fn ($p) => $p['product']['workspace'] === '/daymark');
         $this->get('/products/unknown')->assertNotFound();
     }
 

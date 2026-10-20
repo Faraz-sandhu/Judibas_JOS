@@ -143,3 +143,5 @@ Route::post('/broadcasting/auth/batch', function (Request $r) {
 require __DIR__.'/pms.php';
 
 require __DIR__.'/canteen.php';
+
+require __DIR__.'/daymark.php';
