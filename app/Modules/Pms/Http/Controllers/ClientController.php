@@ -22,7 +22,7 @@ class ClientController extends Controller {
   foreach($companies as $company){$company->setRelation('clients',$clients->where('company_id',$company->id)->values());$company->setRelation('unassigned_projects',$projects->where('company_id',$company->id)->whereNull('client_id')->values());}
   if(!$all)$companies=$companies->filter(fn($c)=>$c->clients->isNotEmpty()||$c->unassigned_projects->isNotEmpty())->values();
   $legacy=PmsVisibility::unrestricted()?$projects->whereNotIn('company_id',$companyIds)->values():collect();
-  return response()->json(['companies'=>$companies,'unassigned_projects'=>$legacy]);
+  return response()->json(['companies'=>$companies,'unassigned_projects'=>$legacy,'show_companies'=>$all]);
  }
  private function visible(Client $client):void {abort_unless(in_array($client->company_id,PmsVisibility::companyIds()),404);}
  public function save(Request $r,?Client $client=null){PmsAccess::requirePermission($r,$client?'client-edit':'client-add');if($client)$this->visible($client);$v=$r->validate(['company_id'=>['required','integer',Rule::in(PmsVisibility::companyIds())],'name'=>['required','string','max:255',Rule::unique('pms_clients')->where('company_id',$r->company_id)->ignore($client?->id)],'email'=>'nullable|email|max:255','phone'=>'nullable|string|max:50','website'=>'nullable|url|max:2048','description'=>'nullable|string|max:10000','status'=>'required|boolean']);if($client&&$client->company_id!=(int)$v['company_id'])abort_if($client->projects()->exists(),422,'A client with projects cannot move to another company.');$client?$client->update($v):$client=Client::create($v);return response()->json(['client'=>$client,'message'=>'Client saved.'],$client->wasRecentlyCreated?201:200);}

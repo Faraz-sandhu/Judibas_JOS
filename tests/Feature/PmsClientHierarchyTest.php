@@ -29,7 +29,7 @@ class PmsClientHierarchyTest extends TestCase {
   DB::table('pms_projects')->whereIn('id',[$project,$hidden,$other])->update(['approval'=>'approved']);$user=$this->employee($platform);
   foreach([$task,$otherTask] as $id)DB::table('pms_task_user')->insert(['task_id'=>$id,'user_id'=>$user->id]);DB::table('pms_project_user')->insert(['project_id'=>$hidden,'user_id'=>$user->id]);
   $this->withSession(['judibas_admin'=>false])->actingAs($user);
-  $r=$this->getJson('/pms/api/hierarchy')->assertOk();$r->assertJsonFragment(['name'=>'Cedar Retail'])->assertJsonFragment(['name'=>'Cedar Portal'])->assertJsonMissing(['name'=>'Cedar Logistics'])->assertJsonMissing(['name'=>'Northstar Company']);
+  $r=$this->getJson('/pms/api/hierarchy')->assertOk()->assertJsonPath('show_companies',false);$r->assertJsonFragment(['name'=>'Cedar Retail'])->assertJsonFragment(['name'=>'Cedar Portal'])->assertJsonMissing(['name'=>'Cedar Logistics'])->assertJsonMissing(['name'=>'Northstar Company']);
   $this->assertSame([$dev],$r->json('companies.0.clients.0.projects.0.departments.*.id'));
   $this->getJson('/pms/api/clients')->assertOk()->assertJsonMissing(['name'=>'Cedar Logistics']);
   $this->getJson('/pms/api/projects/'.$project.'?department='.$dev)->assertOk()->assertJsonCount(1,'data.boardTasks');
@@ -53,7 +53,7 @@ class PmsClientHierarchyTest extends TestCase {
  public function test_project_manager_with_view_all_sees_every_company_without_project_membership():void {
   [, $company]=$this->company('Summit Company');$client=$this->client($company,'Summit Health');$department=$this->department('Summit Marketing');$project=$this->project($client,'Summit Campaign',[$department]);$task=$this->task($project,$department,'Campaign launch');
   $u=User::factory()->create(['is_active'=>true,'status'=>1]);DB::table('user_product_access')->insert(['user_id'=>$u->id,'product_slug'=>'projects']);DB::table('pms_role_users')->insert(['user_id'=>$u->id,'role_id'=>DB::table('pms_roles')->where('role_key','project_manager')->value('id')]);
-  $this->withSession(['judibas_admin'=>false])->actingAs($u);$this->getJson('/pms/api/hierarchy')->assertOk()->assertJsonFragment(['name'=>'Summit Company']);$this->getJson('/pms/api/projects/'.$project.'?department='.$department)->assertOk()->assertJsonFragment(['title'=>'Campaign launch']);$this->getJson('/pms/api/tasks/'.$task)->assertOk();
+  $this->withSession(['judibas_admin'=>false])->actingAs($u);$this->getJson('/pms/api/hierarchy')->assertOk()->assertJsonPath('show_companies',true)->assertJsonFragment(['name'=>'Summit Company']);$this->getJson('/pms/api/projects/'.$project.'?department='.$department)->assertOk()->assertJsonFragment(['title'=>'Campaign launch']);$this->getJson('/pms/api/tasks/'.$task)->assertOk();
  }
  public function test_subtask_assignment_grants_only_its_parent_project_in_the_selected_company():void {
   [$platform,$company]=$this->company('Orion Company');$client=$this->client($company,'Orion Travel');$department=$this->department('Orion SEO');$project=$this->project($client,'Orion Search',[$department]);$task=$this->task($project,$department,'Search campaign');$sub=$this->postJson('/pms/api/subtasks',['task_id'=>$task,'title'=>'Review keyword list'])->assertOk()->json('subtask.id');
@@ -71,7 +71,7 @@ class PmsClientHierarchyTest extends TestCase {
   $this->assertDatabaseHas('pms_companies',['platform_company_id'=>$platform,'name'=>'Horizon Shared Company']);
   $companies=$this->getJson('/pms/api/clients')->assertOk()->json('companies');$this->assertNotContains($legacy,array_column($companies,'id'));
   $this->postJson('/communication/api/companies/'.$platform,['name'=>'Horizon Group'])->assertOk();$this->getJson('/pms/api/clients')->assertOk()->assertJsonFragment(['name'=>'Horizon Group'])->assertJsonMissing(['name'=>'Horizon Shared Company']);
-  $this->getJson('/pms/api/hierarchy')->assertOk()->assertJsonFragment(['name'=>'Horizon Group'])->assertJsonMissing(['name'=>'Legacy Sample Vendor']);
+  $this->getJson('/pms/api/hierarchy')->assertOk()->assertJsonPath('show_companies',true)->assertJsonFragment(['name'=>'Horizon Group'])->assertJsonMissing(['name'=>'Legacy Sample Vendor']);
  }
 
  public function test_eye_boards_include_every_child_department_sprint_and_backlog_without_other_scopes():void {

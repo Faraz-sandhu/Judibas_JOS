@@ -1,15 +1,17 @@
 <script setup lang="ts">
+import PmsHierarchyClientNode from './PmsHierarchyClientNode.vue';
 import PmsHierarchyProjectNode from './PmsHierarchyProjectNode.vue';
 import {computed,ref,onMounted,onUnmounted,watch} from 'vue';
 import {pmsFetch,withoutPmsLoader} from './loading';
+const showCompanies=ref(false),currentCompany=ref<number|null>(null);
 const workspaceOpened=ref(false),root=ref<HTMLElement|null>(null);
 const currentClient=ref<number|null>(null),currentProject=ref<number|null>(null),currentDepartment=ref<number|null>(null);
 const companies=ref<any[]>([]),legacy=ref<any[]>([]),error=ref(''),loading=ref(false),loaded=ref(false);
 const emit=defineEmits(['client','project','board','preview']);
-// Use the existing permission-filtered hierarchy; remove only its company presentation layer.
+// Presentation follows management access; the server continues filtering all hierarchy data.
 const clients=computed(()=>companies.value.flatMap(company=>company.clients||[]).sort((a,b)=>a.name.localeCompare(b.name)));
 const unassignedProjects=computed(()=>{
- const projects=[...companies.value.flatMap(company=>company.unassigned_projects||[]),...legacy.value];
+ const projects=[...(showCompanies.value?[]:companies.value.flatMap(company=>company.unassigned_projects||[])),...legacy.value];
  return [...new Map(projects.map(project=>[project.id,project])).values()].sort((a,b)=>a.name.localeCompare(b.name));
 });
 function collapse(){workspaceOpened.value=false;const details=root.value?.querySelector<HTMLDetailsElement>('.pms-client-workspace');if(details)details.open=false;}
@@ -17,10 +19,11 @@ function outside(event:PointerEvent){if(event.target instanceof Node&&!root.valu
 function escape(event:KeyboardEvent){if(event.key==='Escape')collapse();}
 function selection(){
  const query=new URLSearchParams(location.search);
+ currentCompany.value=query.get('board-scope')==='company'?Number(query.get('board-id'))||null:null;
  currentClient.value=(query.get('board-scope')==='client'?Number(query.get('board-id')):Number(query.get('client')))||null;
  currentProject.value=(query.get('board-scope')==='project'?Number(query.get('board-id')):Number(query.get('project')))||null;
  currentDepartment.value=Number(query.get('department'))||null;
- workspaceOpened.value=!!(currentClient.value||currentProject.value);
+ workspaceOpened.value=!!(currentCompany.value||currentClient.value||currentProject.value);
 }
 selection();
 let pendingLoad:Promise<void>|null=null;
@@ -30,13 +33,9 @@ function load():Promise<void>{
  pendingLoad=(async()=>{try{
   const response=await withoutPmsLoader(()=>pmsFetch('/pms/api/hierarchy',{headers:{Accept:'application/json'}}));
   const data=await response.json();if(!response.ok)throw Error(data.message||'Unable to load workspace.');
-  companies.value=data.companies||[];legacy.value=data.unassigned_projects||[];loaded.value=true;
+  showCompanies.value=data.show_companies===true;companies.value=data.companies||[];legacy.value=data.unassigned_projects||[];loaded.value=true;
  }catch(e){error.value=(e as Error).message;}finally{loading.value=false;pendingLoad=null;}})();
  return pendingLoad;
-}
-function clientToggle(event:Event){
- const client=event.currentTarget as HTMLDetailsElement;if(!client.open)return;
- client.parentElement?.querySelectorAll<HTMLDetailsElement>(':scope > details.pms-hierarchy-client').forEach(other=>{if(other!==client)other.open=false;});
 }
 watch(workspaceOpened,opened=>{if(opened&&!loaded.value)void load();});
 onMounted(()=>{document.addEventListener('pointerdown',outside);document.addEventListener('keydown',escape);if(workspaceOpened.value)void load();window.addEventListener('pms:hierarchy-changed',load);window.addEventListener('pms:navigation',selection);});
@@ -45,14 +44,20 @@ onUnmounted(()=>{document.removeEventListener('pointerdown',outside);document.re
 <template>
  <div ref="root" class="pms-hierarchy-nav">
   <details class="pms-client-workspace" :open="workspaceOpened" @toggle="workspaceOpened=($event.currentTarget as HTMLDetailsElement).open">
-   <summary :class="{active:!!currentClient||!!currentProject}"><i class="ti ti-users" aria-hidden="true"></i><span class="pms-tree-label">Client Workspace</span><i class="ti ti-chevron-right pms-tree-chevron" aria-hidden="true"></i></summary>
+   <summary :class="{active:!!currentCompany||!!currentClient||!!currentProject}"><i class="ti ti-users" aria-hidden="true"></i><span class="pms-tree-label">Client Workspace</span><i class="ti ti-chevron-right pms-tree-chevron" aria-hidden="true"></i></summary>
    <div class="pms-client-workspace-content pms-tree-children">
     <p v-if="error" class="small text-danger" role="alert">{{error}}</p>
     <p v-if="loading&&!loaded" class="small text-muted" role="status">Loading clients...</p>
-    <details v-for="client in clients" :key="client.id" class="pms-tree-node pms-hierarchy-client pms-tree-client-root" name="pms-client-tree" @toggle="clientToggle" :open="client.id===currentClient||client.projects.some((project:any)=>project.id===currentProject)">
-     <summary><i class="ti ti-address-book" aria-hidden="true"></i><button class="pms-tree-label" :title="client.name" @click.stop.prevent="emit('client',client.id)">{{client.name}}</button><button class="pms-tree-eye" :aria-label="'View client board: '+client.name" :title="'View all '+client.name+' tasks'" @click.stop.prevent="emit('preview','client',client.id)"><i class="ti ti-eye" aria-hidden="true"></i></button><i class="ti ti-chevron-right pms-tree-chevron" aria-hidden="true"></i></summary>
-     <div class="pms-tree-children"><PmsHierarchyProjectNode v-for="project in client.projects" :key="project.id" :project="project" :current-project="currentProject" :current-department="currentDepartment" @project="emit('project',$event)" @board="(project,department)=>emit('board',project,department)" @preview="(scope,id)=>emit('preview',scope,id)"/><p v-if="!client.projects.length" class="small text-muted pms-tree-node">No projects yet.</p></div>
-    </details>
+    <template v-if="showCompanies">
+     <details v-for="company in companies" :key="company.id" class="pms-tree-node pms-hierarchy-company" :open="company.id===currentCompany||company.clients.some((client:any)=>client.id===currentClient||client.projects.some((project:any)=>project.id===currentProject))||company.unassigned_projects.some((project:any)=>project.id===currentProject)">
+      <summary><i class="ti ti-building" aria-hidden="true"></i><span class="pms-tree-label" :title="company.name">{{company.name}}</span><button class="pms-tree-eye" :aria-label="'View company board: '+company.name" @click.stop.prevent="emit('preview','company',company.id)"><i class="ti ti-eye" aria-hidden="true"></i></button><i class="ti ti-chevron-right pms-tree-chevron" aria-hidden="true"></i></summary>
+      <div class="pms-tree-children"><PmsHierarchyClientNode v-for="client in company.clients" :key="client.id" :client="client" :current-client="currentClient" :current-project="currentProject" :current-department="currentDepartment" @client="emit('client',$event)" @project="emit('project',$event)" @board="(project,department)=>emit('board',project,department)" @preview="(scope,id)=>emit('preview',scope,id)"/>
+       <PmsHierarchyProjectNode v-for="project in company.unassigned_projects" :key="project.id" :project="project" :current-project="currentProject" :current-department="currentDepartment" @project="emit('project',$event)" @board="(project,department)=>emit('board',project,department)" @preview="(scope,id)=>emit('preview',scope,id)"/>
+       <p v-if="!company.clients.length&&!company.unassigned_projects.length" class="small text-muted pms-tree-node">No clients yet.</p>
+      </div>
+     </details>
+    </template>
+    <PmsHierarchyClientNode v-if="!showCompanies" v-for="client in clients" :key="client.id" :client="client" :current-client="currentClient" :current-project="currentProject" :current-department="currentDepartment" @client="emit('client',$event)" @project="emit('project',$event)" @board="(project,department)=>emit('board',project,department)" @preview="(scope,id)=>emit('preview',scope,id)"/>
     <details v-if="unassignedProjects.length" class="pms-tree-node pms-tree-client-root" :open="unassignedProjects.some(project=>project.id===currentProject)">
      <summary><i class="ti ti-folder" aria-hidden="true"></i><span class="pms-tree-label">Projects without a client</span><i class="ti ti-chevron-right pms-tree-chevron" aria-hidden="true"></i></summary>
      <div class="pms-tree-children"><PmsHierarchyProjectNode v-for="project in unassignedProjects" :key="project.id" :project="project" :current-project="currentProject" :current-department="currentDepartment" @project="emit('project',$event)" @board="(project,department)=>emit('board',project,department)" @preview="(scope,id)=>emit('preview',scope,id)"/></div>
