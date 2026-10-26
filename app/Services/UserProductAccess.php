@@ -8,6 +8,7 @@ class UserProductAccess
  public static function rules(): array {return [
   'product_slugs'=>'required|array|min:1','product_slugs.*'=>['required','string','distinct',Rule::in(array_column(config('judibas.products'),'slug'))],
   'company_ids'=>'present|array|max:100','company_ids.*'=>'integer|distinct|exists:communication_companies,id',
+  'accounting_role'=>'sometimes|in:viewer,accountant,manager',
   'daymark_active'=>'sometimes|boolean',
   'daymark_company_id'=>'sometimes|nullable|integer|exists:communication_companies,id',
   'daymark_role'=>'sometimes|in:company_admin,ceo,md,hr,pm,om,employee',
@@ -24,6 +25,7 @@ class UserProductAccess
  ];}
  public static function validateSelection(array $v): void {
   \App\Modules\Daymark\Services\Access::validateSelection($v);
+  if(in_array('accounts',$v['product_slugs'])&&!count($v['company_ids'])&&empty($v['judibas_administrator']))throw \Illuminate\Validation\ValidationException::withMessages(['company_ids'=>'Select at least one company for Accounting.']);
   foreach($v['canteen_level_ids']??[] as $company=>$level)if($level!==null&&$level!==''){if(!in_array('canteen',$v['product_slugs'])||!in_array($company,$v['company_ids'])||!DB::table('canteen_levels')->where('id',$level)->where('company_id',$company)->where('active',true)->exists())throw \Illuminate\Validation\ValidationException::withMessages(['canteen_level_ids'=>'Choose an active benefit level belonging to each selected company.']);}
   if(in_array('canteen',$v['product_slugs'])&&!count($v['company_ids'])) throw \Illuminate\Validation\ValidationException::withMessages(['company_ids'=>'Select at least one company for Canteen.']);
   if(in_array('projects',$v['product_slugs'])&&!count($v['company_ids'])) throw \Illuminate\Validation\ValidationException::withMessages(['company_ids'=>'Select at least one company for PMS.']);
@@ -55,6 +57,7 @@ class UserProductAccess
    if(!$existing)DB::table('canteen_profiles')->insert($changes+['user_id'=>$user->id,'company_id'=>$company,'role'=>'employee','eligible'=>true,'created_at'=>now()]);else DB::table('canteen_profiles')->where('id',$existing->id)->update($changes);
    if(request()->hasSession()&&(!$existing||isset($changes['role'])&&$existing->role!==$changes['role']||array_key_exists('level_id',$changes)&&$existing->level_id!=$changes['level_id']))\App\Modules\Canteen\Services\CanteenAccess::audit(request(),$company,'employee.access-assigned',['user_id'=>$user->id,'previous_role'=>$existing->role??null,'role'=>$changes['role']??$existing->role??'employee','previous_level_id'=>$existing->level_id??null,'level_id'=>array_key_exists('level_id',$changes)?$changes['level_id']:($existing->level_id??null)]);
   }
+  if(in_array('accounts',$slugs)&&!$user->judibas_administrator){$role=$v['accounting_role']??DB::table('accounting_members')->where('user_id',$user->id)->value('role')??'viewer';DB::table('accounting_members')->updateOrInsert(['user_id'=>$user->id],['role'=>$role,'updated_at'=>now()]);}
   if(in_array('daymark',$slugs)&&!$user->judibas_administrator)\App\Modules\Daymark\Services\Access::sync($user,$v+['product_slugs'=>$slugs]);
   if(in_array('projects',$slugs)) {
    $pms=\App\Modules\Pms\Models\User::withoutGlobalScopes()->findOrFail($user->id);

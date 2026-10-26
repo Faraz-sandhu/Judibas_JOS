@@ -28,6 +28,27 @@ class CommunicationTest extends TestCase
         return $u;
     }
 
+    public function test_super_admin_review_selector_only_contains_active_communication_users(): void
+    {
+        $allowed = $this->employee();
+        $inactive = $this->employee();
+        $inactive->forceFill(['is_active' => false])->save();
+        $pms = User::factory()->create(['is_active' => true]);
+        DB::table('user_product_access')->insert(['user_id' => $pms->id, 'product_slug' => 'projects']);
+        $this->withSession(['judibas_admin' => true]);
+        $ids = $this->getJson('/communication/api')->assertOk()->json('review_people.*.id');
+        $this->assertContains($allowed->id, $ids);
+        $this->assertNotContains($inactive->id, $ids);
+        $this->assertNotContains($pms->id, $ids);
+        foreach ([$inactive, $pms] as $user) {
+            $this->getJson('/communication/api?view_user='.$user->id)->assertForbidden();
+            $this->postJson('/communication/api/review', ['view_user' => $user->id])->assertForbidden();
+        }
+        $this->getJson('/communication/api?view_user='.$allowed->id)->assertOk();
+        DB::table('user_product_access')->where('user_id', $allowed->id)->where('product_slug', 'communication')->delete();
+        $this->getJson('/communication/api?view_user='.$allowed->id)->assertForbidden();
+    }
+
     private function direct(User $a, User $b): int
     {
         return $this->actingAs($a)->postJson('/communication/api/conversations', ['kind' => 'direct', 'member_ids' => [$b->id]])->assertOk()->json('id');

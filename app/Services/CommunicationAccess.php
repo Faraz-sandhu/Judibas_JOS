@@ -80,6 +80,8 @@ class CommunicationAccess
             abort_unless(self::super($r), 403);
             $v = $r->validate(['view_user' => 'required|integer|exists:users,id']);
 
+            abort_unless(User::where('id', $v['view_user'])->where('is_active', true)->whereIn('id', DB::table('user_product_access')->where('product_slug', 'communication')->select('user_id'))->exists(), 403, 'Only active users with Communication access can be reviewed.');
+
             return (int) $v['view_user'];
         }
 

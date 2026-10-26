@@ -105,7 +105,7 @@ class CommunicationController extends Controller
         }
 
         return response()->json(['call_history_enabled' => (bool) config('communication_calls.enabled'), 'calling_enabled' => (bool) config('communication_calls.enabled') && ! $this->isAdmin($r) && ! $r->filled('view_user'), 'conversations' => $conversations, 'companies' => $companies->get(), 'teams' => [], 'people' => Access::attachCompanies($people->orderBy('name')->get(['id', 'name', 'email', 'company_id', 'profile_photo_path'])),
-            'review_people' => $this->isAdmin($r) ? User::orderBy('name')->get(['id', 'name', 'email']) : [],
+            'review_people' => $this->isAdmin($r) ? User::where('is_active', true)->whereIn('id', DB::table('user_product_access')->where('product_slug', 'communication')->select('user_id'))->orderBy('name')->get(['id', 'name', 'email']) : [],
             'stories' => CommunicationStoryController::listing($r),
             'admin' => $this->isAdmin($r), 'manager' => Access::manager($r), 'company_id' => Access::company($user), 'user_id' => Auth::id(), 'profile' => ! $this->isAdmin($r) && Auth::check() ? Auth::user()->only(['id', 'name', 'email', 'avatar_url']) : null,
             'viewed_user' => $r->filled('view_user') ? User::findOrFail($user)->only(['id', 'name', 'email']) : null]);

@@ -25,6 +25,7 @@ class PortalController extends Controller
             if ($request->query('manage') === 'overview') return redirect('/products/communication');
             return redirect('/admin#'.match($request->query('manage')) {'users'=>'users','invitations'=>'invitations',default=>'communication'});
         }
+        if ($request->is('products/accounts') && \App\Services\PlatformAccess::product($request, 'accounts')) return redirect('/accounting');
         $products = PortalContent::products();
         if (Auth::check() && !\App\Services\PlatformAccess::administrator($request)) {
             $allowed=Auth::user()->is_active?DB::table('user_product_access')->where('user_id',Auth::id())->pluck('product_slug')->all():[];
