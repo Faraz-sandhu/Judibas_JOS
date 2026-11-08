@@ -81,11 +81,16 @@ class CommunicationController extends Controller
                 })
                 ->groupBy('m.conversation_id')->selectRaw('m.conversation_id,count(*) as total')->pluck('total', 'conversation_id');
         }
+        if (Access::personal($r)) {
+            $unreadCounts = DB::table('communication_messages as m')->join('communication_conversations as c', 'c.id', '=', 'm.conversation_id')->whereIn('c.id', $conversationIds)->whereNotNull('m.sender_id')->whereNull('m.deleted_at')->where(fn ($q) => $q->whereNull('c.super_read_at')->orWhereColumn('m.created_at', '>', 'c.super_read_at'))->groupBy('m.conversation_id')->selectRaw('m.conversation_id,count(*) as total')->pluck('total', 'conversation_id');
+        }
+        $keyRequests = Access::personal($r) ? DB::table('communication_key_requests')->whereIn('conversation_id',$conversationIds)->where('status','pending')->pluck('conversation_id')->all() : [];
         foreach ($conversations as $c) {
             $members = $membersByChat->get($c->id, collect())->map(fn ($m) => ['id' => $m->id, 'name' => $m->name]);
             $c->members = $members;
+            $c->key_access_requested = in_array($c->id,$keyRequests,true);
             if ($c->kind === 'direct') {
-                $c->name = $members->where('id', '!=', $user)->pluck('name')->implode(', ') ?: 'Personal chat';
+                $c->name = $c->super_participant && $user !== null ? 'Super Admin' : ($members->where('id', '!=', $user)->pluck('name')->implode(', ') ?: 'Personal chat');
             }
             if ($c->kind === 'community') {
                 $c->name = $c->company_name;
@@ -104,10 +109,10 @@ class CommunicationController extends Controller
             $companies->whereIn('id', Access::companies($user));
         }
 
-        return response()->json(['call_history_enabled' => (bool) config('communication_calls.enabled'), 'calling_enabled' => (bool) config('communication_calls.enabled') && ! $this->isAdmin($r) && ! $r->filled('view_user'), 'conversations' => $conversations, 'companies' => $companies->get(), 'teams' => [], 'people' => Access::attachCompanies($people->orderBy('name')->get(['id', 'name', 'email', 'company_id', 'profile_photo_path'])),
+        return response()->json(['call_history_enabled' => (bool) config('communication_calls.enabled'), 'calling_enabled' => (bool) config('communication_calls.enabled') && (! $this->isAdmin($r) || Access::personal($r)) && ! $r->filled('view_user'), 'conversations' => $conversations, 'companies' => $companies->get(), 'teams' => [], 'people' => Access::attachCompanies($people->orderBy('name')->get(['id', 'name', 'email', 'company_id', 'profile_photo_path'])),
             'review_people' => $this->isAdmin($r) ? User::where('is_active', true)->whereIn('id', DB::table('user_product_access')->where('product_slug', 'communication')->select('user_id'))->orderBy('name')->get(['id', 'name', 'email']) : [],
             'stories' => CommunicationStoryController::listing($r),
-            'admin' => $this->isAdmin($r), 'manager' => Access::manager($r), 'company_id' => Access::company($user), 'user_id' => Auth::id(), 'profile' => ! $this->isAdmin($r) && Auth::check() ? Auth::user()->only(['id', 'name', 'email', 'avatar_url']) : null,
+            'admin' => $this->isAdmin($r), 'manager' => Access::manager($r), 'company_id' => Access::company($user), 'user_id' => Access::personal($r) ? 0 : Auth::id(), 'profile' => ! $this->isAdmin($r) && Auth::check() ? Auth::user()->only(['id', 'name', 'email', 'avatar_url']) : null,
             'viewed_user' => $r->filled('view_user') ? User::findOrFail($user)->only(['id', 'name', 'email']) : null]);
     }
 
@@ -158,6 +163,7 @@ class CommunicationController extends Controller
         foreach ($messages as $m) {
             $m->reactions = $m->deleted_at ? [] : $reactions->get($m->id, collect())->values();
             if ($m->deleted_at) {
+                $m->protected_payload = null;
                 $m->body = null;
                 $m->attachment_name = null;
             }
@@ -167,7 +173,10 @@ class CommunicationController extends Controller
         if (! $this->isAdmin($r)) {
             DB::table('communication_members')->updateOrInsert(['conversation_id' => $id, 'user_id' => Auth::id()], ['read_at' => now()]);
         }
-        if ($this->isAdmin($r)) {
+        if (Access::personal($r)) {
+            DB::table('communication_conversations')->where('id', $id)->update(['super_read_at' => now()]);
+        }
+        if ($this->isAdmin($r) && !Access::personal($r)) {
             $auditKey = 'communication_review.'.$id.'.'.($r->input('view_user') ?: 'all');
             $last = $r->session()->get($auditKey, 0);
             if ($r->boolean('audit') || time() - $last >= 60) {
@@ -191,7 +200,7 @@ class CommunicationController extends Controller
     {
         $c = $this->conversation($r, $id);
         $v = $r->validate(['kind' => ['required', Rule::in(['media', 'docs', 'links'])], 'before' => 'nullable|integer|min:1']);
-        $q = DB::table('communication_messages')->where('conversation_id', $id)->whereNull('deleted_at');
+        $q = DB::table('communication_messages')->where('conversation_id', $id)->whereNull('deleted_at')->whereNull('protected_payload');
         if ($v['kind'] === 'links') {
             $q->where('body', 'ilike', '%http%');
         } else {
@@ -229,8 +238,9 @@ class CommunicationController extends Controller
         $this->mutable($r);
         $v = $r->validate(['kind' => ['required', Rule::in(['direct', 'group'])], 'name' => 'nullable|string|max:100', 'company_id' => 'nullable|integer|exists:communication_companies,id', 'member_ids' => 'present|array|max:100', 'member_ids.*' => 'integer|distinct|exists:users,id']);
         $admin = $this->isAdmin($r);
+        $personal = Access::personal($r);
         $ids = array_unique(array_merge($v['member_ids'], $admin ? [] : [Auth::id()]));
-        abort_unless($v['kind'] !== 'direct' || (! $admin && count($ids) === 2), 422, 'Choose one contact for a personal chat.');
+        abort_unless($v['kind'] !== 'direct' || (($personal && count($ids) === 1) || (! $admin && count($ids) === 2)), 422, 'Choose one contact for a personal chat.');
         abort_unless($v['kind'] !== 'group' || (count($ids) >= ($admin ? 1 : 2) && ! empty($v['name'])), 422, 'Select members and a group name.');
         $company = $v['kind'] === 'group' ? ($v['company_id'] ?? Access::company()) : null;
         if ($v['kind'] === 'group') {
@@ -247,12 +257,12 @@ class CommunicationController extends Controller
             }
         }
         sort($ids);
-        $key = $v['kind'] === 'direct' ? implode(':', $ids) : null;
-        $id = DB::transaction(function () use ($v, $ids, $key, $admin, $company) {
+        $key = $v['kind'] === 'direct' ? ($personal ? 'super:' : '').implode(':', $ids) : null;
+        $id = DB::transaction(function () use ($v, $ids, $key, $admin, $company, $personal) {
             if ($key && ($existing = DB::table('communication_conversations')->where('direct_key', $key)->value('id'))) {
                 return $existing;
             }
-            $id = DB::table('communication_conversations')->insertGetId(['kind' => $v['kind'], 'name' => $v['name'] ?? null, 'company_id' => $company, 'direct_key' => $key, 'created_by' => $admin ? null : Auth::id(), 'created_at' => now(), 'updated_at' => now()]);
+            $id = DB::table('communication_conversations')->insertGetId(['super_participant' => $personal, 'kind' => $v['kind'], 'name' => $v['name'] ?? null, 'company_id' => $company, 'direct_key' => $key, 'created_by' => $admin ? null : Auth::id(), 'created_at' => now(), 'updated_at' => now()]);
             foreach ($ids as $uid) {
                 DB::table('communication_members')->insert(['conversation_id' => $id, 'user_id' => $uid]);
             }
@@ -268,6 +278,8 @@ class CommunicationController extends Controller
         $this->mutable($r);
         $c = $this->conversation($r, $id);
         abort_unless($c->kind !== 'community' || \App\Services\PlatformAccess::administrator($r), 403, 'Only Super Admin can publish community announcements.');
+        if ($r->filled('protected_payload')) return app(CommunicationProtectionController::class)->send($r, $id);
+        abort_if((json_decode($c->protection ?? 'null', true)['future'] ?? false), 422, 'Unlock this chat and send an encrypted message.');
         $v = $r->validate(['body' => 'nullable|string|max:10000', 'reply_to' => 'nullable|integer', 'attachment' => 'nullable|file|max:10240|mimes:jpg,jpeg,png,webp,pdf,txt,csv,doc,docx,xls,xlsx,zip,webm,ogg,mp3,wav,m4a,mp4']);
         \App\Services\CommunicationMessagePolicy::enforce($r, $v['body'] ?? null);
         abort_unless(trim($v['body'] ?? '') !== '' || $r->hasFile('attachment'), 422, 'Enter a message or attach a file.');
@@ -278,6 +290,8 @@ class CommunicationController extends Controller
         $path = $file ? \App\Services\CommunicationAttachmentStorage::store($file, 'communication') : null;
         try {
             $message = DB::transaction(function () use ($r, $v, $id, $path, $file) {
+                $locked = DB::table('communication_conversations')->where('id', $id)->lockForUpdate()->first();
+                abort_if(json_decode($locked->protection ?? 'null', true)['future'] ?? false, 422, 'Unlock this chat and send an encrypted message.');
                 $mid = DB::table('communication_messages')->insertGetId(['conversation_id' => $id, 'sender_id' => $this->isAdmin($r) ? null : Auth::id(), 'sender_name' => $this->isAdmin($r) ? 'Super Admin' : Auth::user()->name, 'body' => $v['body'] ?? null, 'reply_to' => $v['reply_to'] ?? null, 'attachment_path' => $path, 'attachment_name' => $file ? $file->getClientOriginalName() : null, 'created_at' => now(), 'updated_at' => now()]);
                 DB::table('communication_conversations')->where('id', $id)->update(['updated_at' => now()]);
 
@@ -303,6 +317,7 @@ class CommunicationController extends Controller
         $m = DB::table('communication_messages')->where('id', $id)->first();
         abort_unless($m, 404);
         $c = $this->conversation($r, $m->conversation_id);
+        abort_if($m->protected_payload, 422, 'Protected messages cannot be edited. Send a new protected message instead.');
         abort_unless($c->kind !== 'community' || \App\Services\PlatformAccess::administrator($r), 403);
         abort_unless(! $m->deleted_at && ($this->isAdmin($r) ? $m->sender_id === null && $m->sender_name === 'Super Admin' : $m->sender_id === Auth::id()), 403);
         $v = $r->validate(['body' => 'required|string|max:10000']);
@@ -320,7 +335,7 @@ class CommunicationController extends Controller
         abort_unless($m, 404);
         $this->conversation($r, $m->conversation_id);
         abort_unless($this->isAdmin($r), 403, 'Only Super Admin can delete messages.');
-        DB::table('communication_messages')->where('id', $id)->update(['body' => null, 'deleted_at' => now(), 'updated_at' => now()]);
+        DB::table('communication_messages')->where('id', $id)->update(['body' => null, 'protected_payload' => null, 'deleted_at' => now(), 'updated_at' => now()]);
         if ($m->attachment_path) {
             \App\Services\CommunicationAttachmentStorage::delete($m->attachment_path);
         }
@@ -333,6 +348,11 @@ class CommunicationController extends Controller
         $m = DB::table('communication_messages')->where('id', $id)->whereNull('deleted_at')->first();
         abort_unless($m && $m->attachment_path, 404);
         $this->conversation($r, $m->conversation_id);
+        if ($m->protected_payload) {
+            abort_unless(\App\Services\CommunicationProtection::participant($r, $this->conversation($r, $m->conversation_id)), 403);
+            abort_unless(\App\Services\CommunicationAttachmentStorage::available($m->attachment_path), 404);
+            return Storage::disk('local')->download($m->attachment_path, 'encrypted.bin', ['Content-Type'=>'application/octet-stream', 'Cache-Control'=>'private, no-store', 'X-Content-Type-Options'=>'nosniff']);
+        }
         abort_unless(\App\Services\CommunicationAttachmentStorage::available($m->attachment_path), 404);
         if ($this->isAdmin($r)) {
             $this->audit($r, 'attachment_download', $m->conversation_id);

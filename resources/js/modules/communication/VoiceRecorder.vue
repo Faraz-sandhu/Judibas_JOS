@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import {ref,onBeforeUnmount,watch} from 'vue';
-const props=defineProps<{disabled?:boolean}>();
+const props=defineProps<{disabled?:boolean;maxSeconds?:number}>();
 const emit=defineEmits<{ready:[file:File];active:[value:boolean]}>();
 const recording=ref(false),starting=ref(false),seconds=ref(0),url=ref(''),error=ref('');
 let recorder:MediaRecorder|null=null,stream:MediaStream|null=null,timer:ReturnType<typeof setInterval>|undefined,chunks:Blob[]=[],result:File|null=null,discard=false,disposed=false;
@@ -15,7 +15,7 @@ async function start(){if(props.disabled||starting.value)return;error.value='';c
  recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};
  recorder.onstop=()=>{release();recording.value=false;if(discard||disposed)return;const blob=new Blob(chunks,{type:mime});if(!blob.size){error.value='No audio recorded. Please try again.';return;}const ext=mime.includes('ogg')?'ogg':mime.includes('mp4')?'m4a':'webm';result=new File([blob],'voice-message-'+Date.now()+'.'+ext,{type:mime});url.value=URL.createObjectURL(blob);};
  recorder.onerror=()=>{discard=true;release();recording.value=false;error.value='Recording failed. Please try again.';};
- recorder.start(250);recording.value=true;timer=setInterval(()=>{seconds.value++;if(seconds.value>=300)stop();},1000);
+ recorder.start(250);recording.value=true;timer=setInterval(()=>{seconds.value++;if(seconds.value>=Math.max(1,Math.min(props.maxSeconds||300,300)))stop();},1000);
  }catch(e){release();error.value=(e as DOMException).name==='NotAllowedError'?'Allow microphone access to record a voice message.':(e as Error).message;}finally{starting.value=false;}}
 function stop(){if(recorder?.state==='recording')recorder.stop();}
 function send(){if(result&&!props.disabled){emit('ready',result);clear();}}

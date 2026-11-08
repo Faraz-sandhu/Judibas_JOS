@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark">
-    <title>Careers &middot; Judibas</title>
+    <title>Careers &middot; {{ $companyPage->company_name }}</title>
     <link rel="stylesheet" href="/careers.css?v={{ filemtime(public_path('careers.css')) }}">
 </head>
 <body class="theme-{{ $settings['theme'] }}">
@@ -13,7 +13,8 @@
 </main>@if($settings['footer_show'])<footer class="career-footer"><a class="brand" href="{{ $settings['header_brand_url'] }}">{{ $settings['footer_brand'] }}<span class="brand-dot"></span></a><p>{{ $settings['footer_message'] }}</p><span>{{ str_replace('{year}',date('Y'),$settings['footer_copyright']) }}</span>@if($settings['footer_link_label'] && $settings['footer_link_url'])<a class="footer-link" href="{{ $settings['footer_link_url'] }}">{{ $settings['footer_link_label'] }}</a>@endif</footer>@endif
 <script>
 const jobField=document.querySelector('[name="job_id"]'),departmentField=document.querySelector('[name="department"]');
-jobField?.addEventListener('change',function(){const department=this.selectedOptions[0].dataset.department;if(department)departmentField.value=department;});
+function syncDepartment(){const department=jobField?.selectedOptions[0]?.dataset.department;if(department&&departmentField)departmentField.value=department;}jobField?.addEventListener('change',syncDepartment);syncDepartment();
+const locationField=document.querySelector('[name="preferred_location"]'),locationList=document.querySelector('#career-locations');function syncLocations(){if(!locationList||!jobField?.value)return;let locations=[];try{locations=JSON.parse(jobField.selectedOptions[0]?.dataset.locations||'[]');}catch{}locationList.replaceChildren(...locations.map(value=>{const option=document.createElement('option');option.value=value;return option;}));if(locations.length===1&&!locationField.value)locationField.value=locations[0];}jobField?.addEventListener('change',syncLocations);syncLocations();
 document.querySelectorAll('button[data-job]').forEach(button=>button.addEventListener('click',()=>{if(jobField){jobField.value=button.dataset.job;departmentField.value=button.dataset.department;document.querySelector('#apply').scrollIntoView({behavior:'smooth'});jobField.focus({preventScroll:true});}}));
 const roleSearch=document.querySelector('[data-role-search]');
 const departmentFilter=document.querySelector('[data-department-filter]');

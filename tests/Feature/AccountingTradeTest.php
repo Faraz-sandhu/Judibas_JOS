@@ -24,13 +24,83 @@ class AccountingTradeTest extends TestCase
         $this->company = DB::table('communication_companies')->insertGetId(['name' => 'Trade test company']);
         $this->withSession(['judibas_admin' => true]);
         $this->postJson('/accounting/api/initialize', ['company_id' => $this->company])->assertOk();
-        $this->postJson('/accounting/api/books', ['company_id' => $this->company, 'version' => 0, 'currency' => 'PKR', 'start_date' => now()->subYear()->toDateString()])->assertOk();
+        $this->postJson('/accounting/api/books', ['company_id' => $this->company, 'version' => 0, 'currency' => 'PKR', 'approval_required' => false, 'start_date' => now()->subYear()->toDateString()])->assertOk();
         $this->accounts = DB::table('accounting_accounts')->where('company_id', $this->company)->pluck('id', 'code')->all();
+        foreach (['1000' => '01', '1100' => '01-01', '1110' => '01-01-01', '1120' => '01-01-02', '1130' => '01-01-03', '2000' => '02', '2100' => '02-01', '2110' => '02-01-01', '3000' => '03', '3100' => '03-01', '4000' => '04', '4100' => '04-01', '5000' => '05', '5100' => '05-01', '5110' => '05-01-01'] as $legacy => $code) { $this->accounts[$legacy] = $this->accounts[$code]; }
         foreach (['customer', 'supplier'] as $kind) {
             $this->postJson('/accounting/api/parties', ['company_id' => $this->company, 'kind' => $kind, 'name' => 'Example '.$kind, 'active' => true])->assertOk();
         }
         $this->customer = DB::table('accounting_parties')->where('company_id', $this->company)->where('kind', 'customer')->value('id');
         $this->supplier = DB::table('accounting_parties')->where('company_id', $this->company)->where('kind', 'supplier')->value('id');
+    }
+
+    private function profitBasis(string $basis, ?string $from = null, ?string $to = null, array $extra = [])
+    {
+        return $this->getJson('/accounting/api/reports?'.http_build_query(array_merge(['company_id' => $this->company, 'report' => 'profit', 'basis' => $basis, 'from' => $from ?? now()->subYear()->toDateString(), 'to' => $to ?? now()->toDateString()], $extra)));
+    }
+
+    public function test_cash_basis_uses_payment_dates_partial_settlement_tax_and_reversal_dates(): void
+    {
+        $tax = DB::table('accounting_accounts')->insertGetId(['company_id' => $this->company, 'parent_id' => $this->accounts['2100'], 'code' => '02-01-02', 'name' => 'Output tax', 'root_type' => 'Liability', 'account_type' => 'Tax']);
+        $invoice = $this->create($this->body('sale', ['posting_date' => now()->subDays(20)->toDateString(), 'tax_percent' => '18.00', 'tax_label' => 'Example test rate', 'tax_account_id' => $tax, 'lines' => [['description' => 'Service', 'account_id' => $this->accounts['4100'], 'quantity' => '1', 'rate' => '100.00']]]));
+        $this->profitBasis('accrual')->assertOk()->assertJsonPath('basis', 'accrual')->assertJsonPath('summary.income', '100.00');
+        $this->profitBasis('cash')->assertOk()->assertJsonPath('basis', 'cash')->assertJsonPath('summary.income', '0.00');
+        $invoice = $this->postJson('/accounting/api/invoices/'.$invoice['id'].'/payments', array_replace($this->payment($invoice, '59.00'), ['posting_date' => now()->subDays(5)->toDateString()]))->assertOk()->json('invoice');
+        $firstPayment = $invoice['payments'][0];
+        $this->profitBasis('cash', null, now()->subDays(10)->toDateString())->assertOk()->assertJsonPath('summary.income', '0.00');
+        $this->profitBasis('cash', now()->subDays(6)->toDateString(), now()->subDay()->toDateString())->assertOk()->assertJsonPath('summary.income', '50.00');
+        $invoice = $this->postJson('/accounting/api/invoices/'.$invoice['id'].'/payments', $this->payment($invoice, '59.00'))->assertOk()->json('invoice');
+        $this->profitBasis('cash')->assertOk()->assertJsonPath('summary.income', '100.00');
+        $this->profitBasis('cash', now()->toDateString())->assertOk()->assertJsonPath('summary.income', '50.00');
+        $this->postJson('/accounting/api/invoices/'.$invoice['id'].'/reverse', ['company_id' => $this->company, 'payment_id' => $firstPayment['id'], 'version' => $firstPayment['version'], 'posting_date' => now()->toDateString(), 'reason' => 'Reverse first cash receipt'])->assertOk();
+        $this->profitBasis('cash')->assertOk()->assertJsonPath('summary.income', '50.00');
+        $this->profitBasis('cash', now()->subDays(6)->toDateString(), now()->subDay()->toDateString())->assertOk()->assertJsonPath('summary.income', '50.00');
+        $this->profitBasis('cash', now()->toDateString())->assertOk()->assertJsonPath('summary.income', '0.00');
+        $this->profitBasis('accrual')->assertOk()->assertJsonPath('summary.income', '100.00');
+    }
+
+    public function test_cash_basis_allocates_purchase_payment_between_expense_and_asset(): void
+    {
+        $asset = DB::table('accounting_accounts')->insertGetId(['company_id' => $this->company, 'parent_id' => $this->accounts['1000'], 'code' => '01-02', 'name' => 'Equipment', 'root_type' => 'Asset', 'account_type' => 'Fixed Asset']);
+        $invoice = $this->create($this->body('purchase', ['lines' => [
+            ['description' => 'Office costs', 'account_id' => $this->accounts['5110'], 'quantity' => '1', 'rate' => '80.00'],
+            ['description' => 'Equipment', 'account_id' => $asset, 'quantity' => '1', 'rate' => '20.00'],
+        ]]));
+        $this->profitBasis('cash')->assertOk()->assertJsonPath('summary.expense', '0.00');
+        $this->postJson('/accounting/api/invoices/'.$invoice['id'].'/payments', $this->payment($invoice, '50.00'))->assertOk();
+        $this->profitBasis('cash')->assertOk()->assertJsonPath('summary.expense', '40.00')->assertJsonPath('summary.profit', '-40.00');
+        $this->profitBasis('accrual')->assertOk()->assertJsonPath('summary.expense', '80.00');
+    }
+
+    public function test_cash_basis_rounding_across_tiny_payments_and_full_reversal_has_no_penny_drift(): void
+    {
+        $income = DB::table('accounting_accounts')->insertGetId(['company_id' => $this->company, 'parent_id' => $this->accounts['4000'], 'code' => '04-02', 'name' => 'Other services', 'root_type' => 'Income', 'account_type' => 'Sales']);
+        $tax = DB::table('accounting_accounts')->insertGetId(['company_id' => $this->company, 'parent_id' => $this->accounts['2100'], 'code' => '02-01-02', 'name' => 'Output tax', 'root_type' => 'Liability', 'account_type' => 'Tax']);
+        $invoice = $this->create($this->body('sale', ['tax_percent' => '18.00', 'tax_label' => 'Example', 'tax_account_id' => $tax, 'lines' => [
+            ['description' => 'First', 'account_id' => $this->accounts['4100'], 'quantity' => '1', 'rate' => '0.01'],
+            ['description' => 'Second', 'account_id' => $income, 'quantity' => '1', 'rate' => '0.02'],
+        ]]));
+        $this->assertSame('0.04', $invoice['total']);
+        for ($n = 0; $n < 4; $n++) $invoice = $this->postJson('/accounting/api/invoices/'.$invoice['id'].'/payments', $this->payment($invoice, '0.01'))->assertOk()->json('invoice');
+        $report = $this->profitBasis('cash')->assertOk()->assertJsonPath('summary.income', '0.03');
+        $rows = collect($report->json('rows'))->keyBy('account_id');
+        $this->assertSame('0.01', $rows[$this->accounts['4100']]['amount']);
+        $this->assertSame('0.02', $rows[$income]['amount']);
+        foreach ($invoice['payments'] as $payment) $this->postJson('/accounting/api/invoices/'.$invoice['id'].'/reverse', ['company_id' => $this->company, 'payment_id' => $payment['id'], 'version' => $payment['version'], 'posting_date' => now()->toDateString(), 'reason' => 'Reverse test settlement'])->assertOk();
+        $this->profitBasis('cash')->assertOk()->assertJsonPath('summary.income', '0.00');
+    }
+
+    public function test_cash_basis_large_amounts_remain_exact_and_csv_identifies_the_basis(): void
+    {
+        $invoice = $this->create($this->body('sale', ['lines' => [['description' => 'Large test service', 'account_id' => $this->accounts['4100'], 'quantity' => '1', 'rate' => '9000000000.01']]]));
+        $this->postJson('/accounting/api/invoices/'.$invoice['id'].'/payments', $this->payment($invoice, '4500000000.00'))->assertOk();
+        $this->profitBasis('cash')->assertOk()->assertJsonPath('summary.income', '4500000000.00');
+        $csv = $this->profitBasis('cash', null, null, ['export' => 'csv'])->assertOk()->streamedContent();
+        $this->assertStringContainsString('Cash basis', $csv);
+        $this->assertStringContainsString('4500000000.00', $csv);
+        $this->assertStringNotContainsString('9000000000.01', $csv);
+        $this->assertStringContainsString('Accrual basis', $this->profitBasis('accrual', null, null, ['export' => 'csv'])->assertOk()->streamedContent());
+        $this->profitBasis('invalid')->assertUnprocessable();
     }
 
     private function body(string $kind = 'sale', array $replace = []): array

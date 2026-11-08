@@ -10,6 +10,7 @@ class CvBankDemoSeeder extends Seeder
 {
     public function run(): void
     {
+        $company=\App\Services\CvBankAccess::legacyId();
         $jobs = [
             ['Laravel Developer', 'Development', 'Build Laravel APIs and Vue interfaces. Experience with PostgreSQL and Git is welcome.'],
             ['Graphic Designer', 'Design', 'Create brand assets, social media creatives and thoughtful interface designs.'],
@@ -20,9 +21,9 @@ class CvBankDemoSeeder extends Seeder
         ];
         $jobIds = [];
         foreach ($jobs as [$title, $department, $description]) {
-            DB::table('cv_bank_departments')->insertOrIgnore(['name'=>$department, 'active'=>true, 'created_at'=>now(), 'updated_at'=>now()]);
-            $id = DB::table('cv_bank_jobs')->where('title', $title)->where('department', $department)->value('id');
-            $jobIds[$department] = $id ?: DB::table('cv_bank_jobs')->insertGetId(['title'=>$title, 'department'=>$department, 'description'=>$description, 'active'=>true, 'created_at'=>now(), 'updated_at'=>now()]);
+            DB::table('cv_bank_departments')->insertOrIgnore(['company_id'=>$company,'name'=>$department, 'active'=>true, 'created_at'=>now(), 'updated_at'=>now()]);
+            $id = DB::table('cv_bank_jobs')->where('company_id',$company)->where('title', $title)->where('department', $department)->value('id');
+            $jobIds[$department] = $id ?: DB::table('cv_bank_jobs')->insertGetId(['company_id'=>$company,'department_id'=>DB::table('cv_bank_departments')->where('company_id',$company)->where('name',$department)->value('id'),'title'=>$title, 'department'=>$department, 'description'=>$description, 'active'=>true, 'created_at'=>now(), 'updated_at'=>now()]);
         }
 
         $candidates = [
@@ -38,7 +39,7 @@ class CvBankDemoSeeder extends Seeder
         ];
         foreach ($candidates as $index => [$name, $slug, $department, $status, $skills, $general]) {
             $email = $slug.'.cv-demo@example.test';
-            if (DB::table('cv_bank_applications')->where('email', $email)->exists()) {
+            if (DB::table('cv_bank_applications')->where('company_id',$company)->where('email', $email)->exists()) {
                 continue;
             }
             $path = 'cv-bank/demo/'.$slug.'.pdf';
@@ -53,7 +54,7 @@ class CvBankDemoSeeder extends Seeder
                 'This document contains no real applicant information.',
             ]));
             DB::table('cv_bank_applications')->insert([
-                'job_id'=>$general ? null : $jobIds[$department], 'department'=>$department,
+                'company_id'=>$company,'department_id'=>DB::table('cv_bank_departments')->where('company_id',$company)->where('name',$department)->value('id'),'job_id'=>$general ? null : $jobIds[$department], 'department'=>$department,
                 'name'=>$name.' (Demo)', 'email'=>$email, 'phone'=>null,
                 'cover_letter'=>'Sample application for testing the CV Bank workflow. Skills: '.$skills.'.',
                 'cv_path'=>$path, 'status'=>$status,

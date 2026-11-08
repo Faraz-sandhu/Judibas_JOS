@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import {ref,computed,nextTick,onMounted,onBeforeUnmount} from 'vue';
 import EmojiPicker from './EmojiPicker.vue';
-const props=defineProps<{id:number;mine:boolean;canReply:boolean;canReact:boolean;canPin:boolean;pinned:boolean;canEdit:boolean;canDelete:boolean;contact?:string;canDownload?:boolean}>();
+const props=defineProps<{id:number;mine:boolean;canReply:boolean;canReact:boolean;canPin:boolean;pinned:boolean;canEdit:boolean;canDelete:boolean;contact?:string;canDownload?:boolean;protected?:boolean}>();
 const emit=defineEmits<{action:[action:string];reaction:[emoji:string]}>();
 const root=ref<HTMLElement|null>(null),panel=ref<HTMLElement|null>(null),trigger=ref<HTMLButtonElement|null>(null),picker=ref<InstanceType<typeof EmojiPicker>|null>(null),opened=ref(false),position=ref({left:'0px',top:'0px'});
 const options=computed(()=>[
  ...(props.canReply?[{key:'reply',label:'Reply',icon:'↩'}]:[]),
- {key:'forward',label:'Forward',icon:'↪'},{key:'copy',label:'Copy',icon:'▣'},
+ ...(!props.protected?[{key:'forward',label:'Forward',icon:'\u21aa'},{key:'copy',label:'Copy',icon:'\u25a3'}]:[]),
  ...(props.canDownload?[{key:'download',label:'Download',icon:'↓'}]:[]),
  ...(props.canReact?[{key:'react',label:'React',icon:'☺'}]:[]),
  ...(props.canPin?[{key:'pin',label:props.pinned?'Unpin':'Pin',icon:'⌖'}]:[]),

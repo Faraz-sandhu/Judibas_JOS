@@ -1,0 +1,10 @@
+{
+  "kty": "RSA",
+  "n": "pSg7eV-ncLOZ2H--CQLS5Abs-oVizdDhn-G-mP5meQXl7QfpIRvoG871tCD0BW4Xadfgcs7X6yUEcqj0BsHYpL3MqNYZssDlARHRXFBvl7_BZW14VUh-LffgM5vmBfimNukt_T4-T6oLG7uAYLpe0s7vAIddUbNsv46YoTnxeFdHhvb6AzKLUG_VXFBYpm_21Prve1dawStbbm0FCe-2np8BivqxciGZUjPRqxAbUgXxouuxg7059JA7_W1cIEJN9j_NsMgNCx9HEz8wEJE7PKou4KaaqqZU3P09e-FSZyYtIUGMmV7HY9WyVmqNY4Kk3HC_TIkVN3CsOCREQ-mX5LYmiLfii_vOHbi5ZlPijUz5xA5RWsCHu_s3ocXQYDH4FsxSaOdpEu7jaFVDMKXmnEuVyBwqsVsAfy-yo3BvHniMahKR_8bDFx1abXB_X1CciPmokROOMDpn3CC8zqApHvpJCrJDV3tBTblT7lvJnNJNVSimbfIVbnlEnu7xXm4n",
+  "e": "AQAB",
+  "alg": "RSA-OAEP-256",
+  "ext": true,
+  "key_ops": [
+    "encrypt"
+  ]
+}

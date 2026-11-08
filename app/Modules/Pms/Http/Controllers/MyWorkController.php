@@ -70,7 +70,7 @@ class MyWorkController extends Controller
         $projects = Projects::whereIn('id', $accessibleProjectIds)->orderBy('name')->get(['id', 'name']);
         $sprints = Sprint::whereIn('project_id', $accessibleProjectIds)->latest('id')->get(['id', 'project_id', 'name', 'status']);
         $assignees = $canQuickAssign
-            ? User::query()
+            ? User::query()->where(function($q){\App\Modules\Pms\Services\PmsCompanyContext::users($q);})
                 ->where('status', 1)
                 ->whereDoesntHave('roles', fn (Builder $roles) => $roles->where('role_key', 'admin'))
                 ->when(

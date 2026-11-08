@@ -27,6 +27,46 @@ class AccountingChartTest extends TestCase
         $this->other = DB::table('communication_companies')->insertGetId(['name' => 'Accounting test B', 'created_at' => now(), 'updated_at' => now()]);
     }
 
+    public function test_automatic_codes_follow_the_parent_and_skip_existing_codes(): void
+    {
+        $this->actingAs($this->member());
+        $this->postJson('/accounting/api/initialize', ['company_id' => $this->company])->assertOk();
+        $this->assertSame('01', $this->root()->code);
+        $group = $this->postJson('/accounting/api/accounts', $this->payload(['code' => '', 'is_group' => true, 'account_type' => 'General']))->assertOk()->json('account');
+        $this->assertSame('01-02', $group['code']);
+        $this->postJson('/accounting/api/accounts', $this->payload(['code' => '', 'parent_id' => $group['id']]))->assertOk()->assertJsonPath('account.code', '01-02-01');
+        $this->postJson('/accounting/api/accounts', $this->payload(['code' => '', 'parent_id' => $group['id']]))->assertOk()->assertJsonPath('account.code', '01-02-02');
+        $this->getJson('/accounting/api/data?company_id='.$this->company)->assertOk();
+    }
+
+    public function test_unused_legacy_chart_can_be_normalized_without_changing_account_ids(): void
+    {
+        $this->actingAs($this->member());
+        $this->postJson('/accounting/api/initialize', ['company_id' => $this->company])->assertOk();
+        $root = $this->root();
+        DB::table('accounting_accounts')->where('id', $root->id)->update(['code' => '1000']);
+        $before = DB::table('accounting_accounts')->where('company_id', $this->company)->pluck('id')->all();
+        $this->artisan('accounting:normalize-codes', ['company' => $this->company])->assertSuccessful();
+        $this->assertDatabaseHas('accounting_accounts', ['id' => $root->id, 'code' => '01']);
+        $this->assertEqualsCanonicalizing($before, DB::table('accounting_accounts')->where('company_id', $this->company)->pluck('id')->all());
+        $this->assertDatabaseHas('accounting_audits', ['company_id' => $this->company, 'action' => 'Unused chart codes normalized']);
+    }
+
+    public function test_deeply_nested_groups_generate_codes_without_the_old_twenty_character_limit(): void
+    {
+        $this->actingAs($this->member());
+        $this->postJson('/accounting/api/initialize', ['company_id' => $this->company])->assertOk();
+        $parent = $this->root()->id;
+        for ($depth = 1; $depth <= 10; $depth++) {
+            $account = $this->postJson('/accounting/api/accounts', $this->payload(['parent_id' => $parent, 'code' => '', 'name' => 'Nested group '.$depth, 'is_group' => true, 'account_type' => 'General']))->assertOk()->json('account');
+            $parent = $account['id'];
+        }
+        $this->assertGreaterThan(20, strlen($account['code']));
+        $leaf = $this->postJson('/accounting/api/accounts', $this->payload(['parent_id' => $parent, 'code' => '', 'name' => 'Nested cash ledger']))->assertOk()->json('account');
+        $this->assertSame($account['code'].'-01', $leaf['code']);
+        $this->getJson('/accounting/api/data?company_id='.$this->company)->assertOk()->assertJsonFragment(['code' => $leaf['code']]);
+    }
+
     private function member(string $role = 'accountant'): User
     {
         $u = User::factory()->create(['is_active' => true]);
@@ -57,7 +97,7 @@ class AccountingChartTest extends TestCase
         $this->actingAs($outsider)->getJson('/accounting/api/data')->assertForbidden();
         $u = $this->member();
         $this->actingAs($u)->get('/accounting')->assertOk()->assertViewHas('portal', fn ($p) => $p['product']['name'] === 'Accounting');
-        $this->get('/products/accounts')->assertRedirect('/accounting');
+        $this->get('/products/accounts')->assertOk()->assertViewHas('portal',fn($portal)=>$portal['product']['slug']==='accounts');
         $this->getJson('/accounting/api/data')->assertOk()->assertJsonPath('companies.0.id', $this->company)->assertJsonCount(1, 'companies');
         $this->getJson('/accounting/api/data?company_id='.$this->other)->assertForbidden();
         $this->postJson('/accounting/api/initialize', ['company_id' => $this->other])->assertForbidden();
@@ -128,7 +168,7 @@ class AccountingChartTest extends TestCase
         $this->setupChart();
         $leaf = $this->postJson('/accounting/api/accounts', $this->payload())->assertOk()->json('account.id');
         $this->deleteJson('/accounting/api/accounts/'.$this->root()->id, ['company_id' => $this->company, 'version' => 1])->assertUnprocessable();
-        $group = DB::table('accounting_accounts')->where('company_id', $this->company)->where('code', '1100')->first();
+        $group = DB::table('accounting_accounts')->where('company_id', $this->company)->where('code', '01-01')->first();
         $this->deleteJson('/accounting/api/accounts/'.$group->id, ['company_id' => $this->company, 'version' => 1])->assertUnprocessable();
         $foreign = DB::table('accounting_accounts')->insertGetId(['company_id' => $this->other, 'code' => '1000', 'name' => 'Other Assets', 'root_type' => 'Asset', 'account_type' => 'General', 'is_group' => true, 'is_system' => true, 'active' => true, 'created_at' => now(), 'updated_at' => now()]);
         $this->postJson('/accounting/api/accounts', $this->payload(['id' => $foreign]))->assertNotFound();

@@ -11,7 +11,7 @@ class CommunicationCallSignal implements ShouldBroadcastNow
 
     public function broadcastOn(): array
     {
-        return [new PrivateChannel('communication.user.'.$this->recipient)];
+        return [new PrivateChannel('communication.user.'.($this->recipient === 0 ? 'super' : $this->recipient))];
     }
 
     public function broadcastAs(): string

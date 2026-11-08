@@ -116,7 +116,7 @@ class SummaryController extends Controller
     //         return response()->json(['data' => $rows]);
     //     }
 
-    //     $users = $isAdmin ? User::select('id', 'name')->where('id', '!=', $user->id)->get() : collect();
+    //     $users = $isAdmin ? User::where(function($q){\App\Modules\Pms\Services\PmsCompanyContext::users($q);})->select('id', 'name')->where('id', '!=', $user->id)->get() : collect();
     //     $projects = $isAdmin
     //         ? Projects::select('id', 'name')->get()
     //         : Projects::whereHas('tasks.users', fn($q) => $q->where('users.id', $user->id))
@@ -266,7 +266,7 @@ class SummaryController extends Controller
         }
 
         $users = $allUsersView
-            ? User::select('id', 'name')->where('id', '!=', $user->id)->get()
+            ? User::where(function($q){\App\Modules\Pms\Services\PmsCompanyContext::users($q);})->select('id', 'name')->where('id', '!=', $user->id)->get()
             : collect();
 
         $projects = $allUsersView

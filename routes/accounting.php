@@ -16,8 +16,23 @@ Route::get('/accounting', function (Request $r) {
 
 return app(PortalController::class)->index($r, 'accounts');
 });
+Route::get('/accounting/journals/{id}/print', [\App\Modules\Accounting\Http\Controllers\JournalController::class, 'printJournal'])->whereNumber('id');
+Route::get('/accounting/vouchers/{id}/print', [\App\Modules\Accounting\Http\Controllers\JournalController::class, 'printVoucher'])->whereNumber('id');
 Route::get('/accounting/invoices/{id}/print', [\App\Modules\Accounting\Http\Controllers\TradeController::class, 'printInvoice'])->whereNumber('id');
 Route::prefix('accounting/api')->group(function () {
+    Route::get('all-companies', [\App\Modules\Accounting\Http\Controllers\AllCompaniesController::class, 'index']);
+    Route::get('notifications', [\App\Modules\Accounting\Http\Controllers\NotificationController::class, 'index']);
+    Route::post('notifications/read', [\App\Modules\Accounting\Http\Controllers\NotificationController::class, 'read']);
+    Route::get('notifications/realtime/config', [\App\Modules\Accounting\Http\Controllers\NotificationController::class, 'config']);
+    Route::post('notifications/realtime/auth', [\App\Modules\Accounting\Http\Controllers\NotificationController::class, 'auth']);
+    Route::post('approvals/{id}/signed-copy', [\App\Modules\Accounting\Http\Controllers\SignedCopyController::class, 'store'])->whereNumber('id');
+    Route::get('signed-copies/{id}', [\App\Modules\Accounting\Http\Controllers\SignedCopyController::class, 'show'])->whereNumber('id');
+    Route::get('roles', [\App\Modules\Accounting\Http\Controllers\RoleController::class, 'index']);
+    Route::post('roles', [\App\Modules\Accounting\Http\Controllers\RoleController::class, 'save']);
+    Route::get('approvals', [\App\Modules\Accounting\Http\Controllers\ApprovalController::class, 'index']);
+    Route::get('approvals/document', [\App\Modules\Accounting\Http\Controllers\ApprovalController::class, 'document']);
+    Route::post('approvals/submit', [\App\Modules\Accounting\Http\Controllers\ApprovalController::class, 'submit']);
+    Route::post('approvals/{id}/actions', [\App\Modules\Accounting\Http\Controllers\ApprovalController::class, 'action'])->whereNumber('id');
     Route::get('parties', [\App\Modules\Accounting\Http\Controllers\TradeController::class, 'parties']);
     Route::post('parties', [\App\Modules\Accounting\Http\Controllers\TradeController::class, 'saveParty']);
     Route::get('invoices', [\App\Modules\Accounting\Http\Controllers\TradeController::class, 'invoices']);
@@ -31,6 +46,8 @@ Route::prefix('accounting/api')->group(function () {
     Route::post('journals', [\App\Modules\Accounting\Http\Controllers\JournalController::class, 'save']);
     Route::post('journals/{id}/post', [\App\Modules\Accounting\Http\Controllers\JournalController::class, 'post'])->whereNumber('id');
     Route::post('journals/{id}/reverse', [\App\Modules\Accounting\Http\Controllers\JournalController::class, 'reverse'])->whereNumber('id');
+    Route::get('cash-basis-reviews/{id}', [\App\Modules\Accounting\Http\Controllers\CashBasisReviewController::class, 'show'])->whereNumber('id');
+    Route::post('cash-basis-reviews/{id}', [\App\Modules\Accounting\Http\Controllers\CashBasisReviewController::class, 'save'])->whereNumber('id');
     Route::get('reports', [\App\Modules\Accounting\Http\Controllers\FinancialReportsController::class, 'report']);
     Route::get('data', [ChartOfAccountsController::class, 'data']);
     Route::post('initialize', [ChartOfAccountsController::class, 'initialize']);

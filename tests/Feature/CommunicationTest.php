@@ -49,6 +49,31 @@ class CommunicationTest extends TestCase
         $this->getJson('/communication/api?view_user='.$allowed->id)->assertForbidden();
     }
 
+    public function test_super_admin_personal_chats_are_separate_from_read_only_review(): void
+    {
+        $a = $this->employee();$b = $this->employee();
+        $other = $this->direct($a, $b);
+        $this->withSession(['judibas_admin' => true]);
+        $chat = $this->postJson('/communication/api/conversations?mode=personal', ['kind' => 'direct', 'member_ids' => [$a->id]])->assertOk()->json('id');
+        $this->assertDatabaseHas('communication_conversations', ['id' => $chat, 'super_participant' => true]);
+        $this->postJson('/communication/api/conversations?mode=personal', ['kind' => 'direct', 'member_ids' => [$a->id]])->assertOk()->assertJsonPath('id', $chat);
+        $mine = $this->getJson('/communication/api?mode=personal')->assertOk()->json('conversations.*.id');
+        $this->assertContains($chat, $mine);$this->assertNotContains($other, $mine);
+        $this->postJson('/communication/api/conversations/'.$chat.'/messages?mode=personal', ['body' => 'Hello from Super Admin'])->assertCreated();
+        $this->assertDatabaseHas('communication_messages', ['conversation_id' => $chat, 'sender_id' => null, 'sender_name' => 'Super Admin', 'body' => 'Hello from Super Admin']);
+        $this->postJson('/communication/api/conversations/'.$other.'/messages?mode=personal', ['body' => 'Must not join another chat'])->assertForbidden();
+        $review = $this->getJson('/communication/api?mode=review')->assertOk()->json('conversations.*.id');
+        $this->assertContains($other, $review);
+        $this->postJson('/communication/api/conversations/'.$other.'/messages?mode=review', ['body' => 'Read-only'])->assertForbidden();
+        $this->postJson('/communication/api/conversations?mode=review', ['kind' => 'direct', 'member_ids' => [$b->id]])->assertForbidden();
+        $this->withSession(['judibas_admin' => false])->actingAs($a);
+        $this->getJson('/communication/api')->assertOk()->assertJsonFragment(['name' => 'Super Admin']);
+        $this->postJson('/communication/api/conversations/'.$chat.'/messages', ['body' => 'Employee reply'])->assertCreated();
+        $this->actingAs($b)->getJson('/communication/api/conversations/'.$chat.'/messages')->assertForbidden();
+        $this->withSession(['judibas_admin' => true])->getJson('/communication/api?mode=personal')->assertOk();
+        $this->getJson('/communication/api/conversations/'.$chat.'/messages?mode=personal')->assertOk()->assertJsonCount(2, 'messages');
+    }
+
     private function direct(User $a, User $b): int
     {
         return $this->actingAs($a)->postJson('/communication/api/conversations', ['kind' => 'direct', 'member_ids' => [$b->id]])->assertOk()->json('id');

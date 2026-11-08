@@ -25,7 +25,6 @@ class PortalController extends Controller
             if ($request->query('manage') === 'overview') return redirect('/products/communication');
             return redirect('/admin#'.match($request->query('manage')) {'users'=>'users','invitations'=>'invitations',default=>'communication'});
         }
-        if ($request->is('products/accounts') && \App\Services\PlatformAccess::product($request, 'accounts')) return redirect('/accounting');
         $products = PortalContent::products();
         if (Auth::check() && !\App\Services\PlatformAccess::administrator($request)) {
             $allowed=Auth::user()->is_active?DB::table('user_product_access')->where('user_id',Auth::id())->pluck('product_slug')->all():[];
@@ -52,6 +51,12 @@ class PortalController extends Controller
             'logoIcon' => empty($settings['logo_icon']) ? null : '/branding/'.basename(parse_url($settings['logo_icon'], PHP_URL_PATH)),
             'products' => $products, 'product' => $product, 'pmsBootstrap'=>$request->attributes->get('pms.bootstrap'),
             'productsPage' => $request->is('products'),
+            'workspaceGroupName' => $slug ? \App\Services\CatalogueCompanyScope::label($slug,$request) : null,
+            'workspacePath' => $request->attributes->get('workspace.root'),
+            'companyWorkspace' => $request->attributes->get('workspace.company'),
+            'workspaceCompanies' => \App\Services\CompanyWorkspace::permitted($request),
+            'productsTheme' => \App\Services\ProductCatalogue::theme(),
+            'catalogueGroups' => $request->is('products') ? \App\Services\ProductCatalogue::groups($request, $products) : [],
             'page' => $page,
             'posts' => $request->is('blog') ? DB::table('blog_posts')->where('published', true)->orderByDesc('updated_at')->get() : [],
             'announcement' => PortalContent::announcement(),

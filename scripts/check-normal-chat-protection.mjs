@@ -1,0 +1,34 @@
+import {chromium,expect} from '@playwright/test';
+import assert from 'node:assert/strict';
+const browser=await chromium.launch({channel:'msedge',headless:true});
+try{
+ const page=await browser.newPage({viewport:{width:1440,height:1000},serviceWorkers:'block'}),errors=[];page.on('pageerror',e=>{errors.push(e.message);console.log('Browser error:',e.message);});
+ 
+ let created=false,protection=null;const writes=[],messages=[];
+ const person={id:41,name:'Demo employee',email:'employee@example.test',company_id:1,company_ids:[1]};
+ const own={super_participant:true,id:21,kind:'direct',name:'Demo employee',members:[person],preview:'No messages yet',last_message_at:null,unread:0};
+ const reviewed={id:22,kind:'direct',name:'Private employee chat',members:[person,{...person,id:42,name:'Other employee'}],preview:'Employee conversation',last_message_at:null,unread:0};
+ await page.route(/\/communication\/api(?:\/|\?|$)/,async route=>{
+  const url=new URL(route.request().url()),path=url.pathname.replace('/communication/api',''),method=route.request().method(),mode=url.searchParams.get('mode');let data={};
+  if(path==='/realtime/config')data={enabled:false};
+  else if(path==='/presence')data={states:{},preferences:{}};
+  else if(path==='')data={admin:true,manager:true,user_id:null,profile:null,company_id:null,calling_enabled:false,call_history_enabled:false,companies:[{id:1,name:'Demo company'}],people:[person],review_people:[person],stories:[],viewed_user:null,conversations:mode==='review'?[reviewed,...(created?[own]:[])]:created?[own]:[]};
+  else if(path==='/conversations'&&method==='POST'){const body=route.request().postDataJSON();writes.push({mode,body});created=true;data={id:21};}
+  else if(path.endsWith('/key-recovery'))data={saved:true};
+  else if(path.endsWith('/key-access'))data={devices:[],requests:[],has_delivery:false,recovery:null};
+  else if(path.endsWith('/protection')){if(method==='PUT'){protection=route.request().postDataJSON();writes.push({mode,body:protection});}data={protection,participant:mode==='personal'};}
+  else if(path.endsWith('/messages')){if(method==='POST'){const form=route.request().postData();writes.push({mode,body:form});const protectedPayload=form.match(/name="protected_payload"\r\n\r\n([^\r]+)/)?.[1],uuid=form.match(/name="protected_uuid"\r\n\r\n([^\r]+)/)?.[1];const message={protected_payload:protectedPayload,protected_uuid:uuid,id:messages.length+1,sender_id:null,sender_name:'Super Admin',body:protectedPayload?'Protected message':'Hello colleague',created_at:new Date().toISOString(),reactions:[],attachment_url:null,deleted_at:null};messages.push(message);data={id:message.id,message};}else data={messages:path.includes('/21/')?messages:[],pinned:[],has_more:false,has_newer:false};}
+  await route.fulfill({json:data});
+ });
+ await page.route(/\/communication$/,async route=>{const html=await page.request.get('http://127.0.0.1:8000/products/communication');await route.fulfill({contentType:'text/html',body:await html.text()});});
+ await page.goto('http://127.0.0.1:8000/communication',{waitUntil:'networkidle'});
+ await expect(page.locator('.comm-private-thread')).toHaveCount(0);await expect(page.getByRole('button',{name:'Previous private chats',exact:true})).toHaveCount(0);await expect(page.locator('.encrypted-workspace')).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'My chats',exact:true})).toHaveAttribute('aria-pressed','true');await expect(page.locator('#comm-review-person')).toHaveCount(0);
+ await page.getByRole('button',{name:'New conversation',exact:true}).click();await expect(page.getByRole('dialog')).toBeVisible();await expect(page.getByLabel('Conversation type')).toHaveValue('direct');await page.getByRole('radio').first().check();
+ await page.getByRole('dialog').getByRole('button',{name:'Create chat',exact:true}).click();await expect(page.getByLabel('Message',{exact:true})).toBeVisible();
+ await page.getByLabel('Message',{exact:true}).fill('Hello colleague');await page.getByRole('button',{name:'Send',exact:true}).click();await expect(page.locator('.comm-messages')).toContainText('Hello colleague');
+ await page.getByRole('button',{name:'Enable message protection'}).click();await expect(page.getByLabel('Generated access key')).toBeVisible();await page.getByRole('button',{name:'Done',exact:true}).click();await page.getByLabel('Message',{exact:true}).fill('Private salary 27500');await page.getByRole('button',{name:'Send',exact:true}).click();await expect(page.locator('.comm-messages')).toContainText('Private salary 27500');assert(!JSON.stringify(writes.at(-1)).includes('Private salary 27500'));await expect(page.getByRole('checkbox',{name:'Protect next message'})).not.toBeChecked();await page.getByRole('button',{name:'Protect all future messages'}).click();await page.getByRole('button',{name:'Lock',exact:true}).click();await page.getByLabel('Message',{exact:true}).fill('Keep this unsent draft');const beforeWrites=writes.length;await page.getByRole('button',{name:'Send',exact:true}).click();await expect(page.getByRole('dialog')).toBeVisible();await expect(page.getByLabel('Message',{exact:true})).toHaveValue('Keep this unsent draft');assert.equal(writes.length,beforeWrites);await page.getByRole('button',{name:'Cancel',exact:true}).click();await page.getByLabel('Message',{exact:true}).fill('');
+ await page.getByRole('button',{name:'Conversation review',exact:true}).click();await expect(page.locator('#comm-review-person')).toBeVisible();await expect(page.locator('.comm-review-banner')).toBeVisible();await expect(page.getByLabel('Message',{exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'New conversation',exact:true})).toHaveCount(0);await page.locator('.comm-conversations button').filter({hasText:'You & Demo employee'}).click();await expect(page.locator('.comm-messages')).toContainText('not available in conversation review');await expect(page.locator('.comm-messages')).not.toContainText('Private salary 27500');await expect(page.locator('.comm-review-banner')).toHaveCount(0,{timeout:6500});await expect(page.getByRole('button',{name:'Conversation review',exact:true})).toHaveAttribute('aria-pressed','true');
+ await page.getByRole('button',{name:'My chats',exact:true}).click();await expect(page.locator('#comm-review-person')).toHaveCount(0);await expect(page.locator('.comm-review-banner')).toHaveCount(0);assert.ok(writes.every(w=>w.mode==='personal'));
+ await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);assert.deepEqual(errors,[]);console.log('Normal chat protection integration passed: Super Admin setup, encrypted sending, safe preview, one-message reset, review masking, ordinary messaging and mobile layout.');
+}finally{await browser.close();}

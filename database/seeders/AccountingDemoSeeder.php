@@ -10,7 +10,9 @@ use Illuminate\Support\Str;
 
 class AccountingDemoSeeder extends Seeder
 {
-    private function request(array $input): Request
+    protected string $companyName = 'Judibas Accounting Demo (TEST ONLY)';
+
+    protected function request(array $input): Request
     {
         $r = Request::create('/accounting-demo', 'POST', $input);
         $session = app('session')->driver();
@@ -23,7 +25,7 @@ class AccountingDemoSeeder extends Seeder
     public function run(): void
     {
         abort_unless(app()->environment(['local', 'testing']), 403, 'Accounting sample data is restricted to local/testing environments.');
-        $name = 'Judibas Accounting Demo (TEST ONLY)';
+        $name = $this->companyName;
         if (DB::table('communication_companies')->where('name', $name)->exists()) {
             $this->command?->info('Accounting demo already exists; no records were changed.');
 
@@ -34,8 +36,9 @@ class AccountingDemoSeeder extends Seeder
             $base = ['company_id' => $company];
             $start = now()->subDays(60)->toDateString();
             app(ChartOfAccountsController::class)->initialize($this->request($base));
-            app(BooksController::class)->save($this->request($base + ['version' => 0, 'currency' => 'PKR', 'start_date' => $start]));
+            app(BooksController::class)->save($this->request($base + ['version' => 0, 'currency' => 'PKR', 'approval_required' => false, 'start_date' => $start]));
             $accounts = DB::table('accounting_accounts')->where('company_id', $company)->pluck('id', 'code')->all();
+            foreach (['1110'=>'01-01-01','1120'=>'01-01-02','1130'=>'01-01-03','2110'=>'02-01-01','3100'=>'03-01','4100'=>'04-01','5110'=>'05-01-01'] as $old => $new) { $accounts[$old] = $accounts[$new]; }
             $trade = app(TradeController::class);
             foreach (['customer' => ['Cedar Retail (Demo)', 'Atlas Logistics (Demo)', 'Northstar Studio (Demo)'], 'supplier' => ['Office Supplies (Demo)', 'Cloud Services (Demo)', 'City Utilities (Demo)']] as $kind => $names) {
                 foreach ($names as $n => $party) {

@@ -19,7 +19,10 @@ class CommunicationCallController extends Controller
     {
         abort_unless(config('communication_calls.enabled'), 404);
         Access::mutable($r);
-        abort_if(Access::super($r), 403, 'Calling is available in employee accounts.');
+        if (Access::super($r)) {
+            abort_unless(Access::personal($r), 403, 'Switch to My chats to make or answer calls.');
+            return 0;
+        }
 
         return (int) $r->user()->id;
     }
@@ -55,7 +58,7 @@ class CommunicationCallController extends Controller
     {
         $names ??= User::whereIn('id', [$c->caller_id, $c->callee_id])->pluck('name', 'id')->all();
 
-        return ['id' => $c->id, 'conversation_id' => (int) $c->conversation_id, 'caller_id' => (int) $c->caller_id, 'callee_id' => (int) $c->callee_id, 'caller_name' => $names[$c->caller_id] ?? 'Employee', 'callee_name' => $names[$c->callee_id] ?? 'Employee', 'waiting' => $c->status === 'ringing' && DB::table('communication_calls')->where('id', '!=', $c->id)->whereIn('status', ['connecting', 'active'])->where(fn ($q) => $q->where('caller_id', $c->callee_id)->orWhere('callee_id', $c->callee_id))->exists(), 'type' => $c->type, 'status' => $c->status, 'created_at' => $c->created_at, 'answered_at' => $c->answered_at, 'ended_at' => $c->ended_at, 'unread' => ! $c->callee_read_at && in_array($c->status, ['missed', 'cancelled', 'busy'])];
+        return ['id' => $c->id, 'conversation_id' => (int) $c->conversation_id, 'caller_id' => (int) $c->caller_id, 'callee_id' => (int) $c->callee_id, 'caller_name' => $c->caller_id === null ? 'Super Admin' : ($names[$c->caller_id] ?? 'Employee'), 'callee_name' => $c->callee_id === null ? 'Super Admin' : ($names[$c->callee_id] ?? 'Employee'), 'waiting' => $c->status === 'ringing' && DB::table('communication_calls')->where('id', '!=', $c->id)->whereIn('status', ['connecting', 'active'])->where(fn ($q) => $q->where('caller_id', $c->callee_id)->orWhere('callee_id', $c->callee_id))->exists(), 'type' => $c->type, 'status' => $c->status, 'created_at' => $c->created_at, 'answered_at' => $c->answered_at, 'ended_at' => $c->ended_at, 'unread' => ! $c->callee_read_at && in_array($c->status, ['missed', 'cancelled', 'busy'])];
     }
 
     private function notify($c, string $kind, array $data = []): void
@@ -71,19 +74,19 @@ class CommunicationCallController extends Controller
     public function index(Request $r)
     {
         abort_unless(config('communication_calls.enabled'), 404);
-        $uid = Access::subject($r);
-        $review = Access::super($r);
+        $uid = Access::personal($r) ? 0 : Access::subject($r);
+        $review = Access::super($r) && !Access::personal($r);
         self::expire();
         $r->validate(['page' => 'nullable|integer|min:1', 'conversation_id' => 'nullable|integer']);
         if ($r->filled('conversation_id')) {
             Access::conversation($r, $r->integer('conversation_id'));
         }
-        $q = DB::table('communication_calls')->when($uid !== null, fn ($q) => $q->where(fn ($q) => $q->where('caller_id', $uid)->orWhere('callee_id', $uid)));
+        $q = DB::table('communication_calls')->when($uid !== null, fn ($q) => $q->where(fn ($q) => $q->where('caller_id', $uid ?: null)->orWhere('callee_id', $uid ?: null)));
         if ($review) {
             DB::table('communication_audits')->insert(['admin_email' => config('judibas.admin_email'), 'viewed_user_id' => $uid, 'conversation_id' => $r->filled('conversation_id') ? $r->integer('conversation_id') : null, 'action' => 'call_history_review', 'created_at' => now()]);
         }
         $q->when($r->filled('conversation_id'), fn ($q) => $q->where('conversation_id', $r->integer('conversation_id')));
-        $unread = $review ? 0 : DB::table('communication_calls')->where('callee_id', $uid)->whereNull('callee_read_at')->whereIn('status', ['missed', 'cancelled', 'busy'])->count();
+        $unread = $review ? 0 : DB::table('communication_calls')->where('callee_id', $uid ?: null)->whereNull('callee_read_at')->whereIn('status', ['missed', 'cancelled', 'busy'])->count();
         $page = $q->orderByDesc('created_at')->orderByDesc('id')->paginate(30);
 
         $names = User::whereIn('id', collect($page->items())->flatMap(fn ($c) => [$c->caller_id, $c->callee_id])->unique())->pluck('name', 'id')->all();
@@ -95,7 +98,7 @@ class CommunicationCallController extends Controller
     {
         $uid = $this->actor($r);
         $v = $r->validate(['ids' => 'required|array|max:30', 'ids.*' => 'required|uuid']);
-        $rows = DB::table('communication_calls')->whereIn('id', $v['ids'])->where('callee_id', $uid)->whereNull('callee_read_at')->whereIn('status', ['missed', 'cancelled', 'busy'])->get();
+        $rows = DB::table('communication_calls')->whereIn('id', $v['ids'])->where('callee_id', $uid ?: null)->whereNull('callee_read_at')->whereIn('status', ['missed', 'cancelled', 'busy'])->get();
         DB::table('communication_calls')->whereIn('id', $rows->pluck('id'))->update(['callee_read_at' => now()]);
         foreach ($rows as $row) {
             try {
@@ -111,9 +114,9 @@ class CommunicationCallController extends Controller
     {
         $uid = $this->actor($r);
         self::expire();
-        $c = DB::table('communication_calls')->whereIn('status', self::LIVE)->where(fn ($q) => $q->where('caller_id', $uid)->orWhere('callee_id', $uid))->orderByRaw("CASE WHEN status IN ('active', 'connecting') THEN 0 ELSE 1 END")->first();
+        $c = DB::table('communication_calls')->whereIn('status', self::LIVE)->where(fn ($q) => $q->where('caller_id', $uid ?: null)->orWhere('callee_id', $uid ?: null))->orderByRaw("CASE WHEN status IN ('active', 'connecting') THEN 0 ELSE 1 END")->first();
 
-        $waiting = $c ? DB::table('communication_calls')->where('id', '!=', $c->id)->where('callee_id', $uid)->where('status', 'ringing')->first() : null;
+        $waiting = $c ? DB::table('communication_calls')->where('id', '!=', $c->id)->where('callee_id', $uid ?: null)->where('status', 'ringing')->first() : null;
         return response()->json(['call' => $c ? $this->dto($c) : null, 'offer' => $c && $c->callee_id == $uid && $c->status === 'ringing' ? Cache::get('communication.call.offer.'.$c->id) : null, 'waiting' => $waiting ? ['call' => $this->dto($waiting), 'offer' => Cache::get('communication.call.offer.'.$waiting->id)] : null])->header('Cache-Control', 'private, no-store');
     }
 
@@ -143,17 +146,21 @@ class CommunicationCallController extends Controller
         $conversation = Access::conversation($r, $v['conversation_id']);
         abort_unless($conversation->kind === 'direct', 422, 'Start calls from a personal chat.');
         $ids = DB::table('communication_members')->where('conversation_id', $conversation->id)->pluck('user_id')->map(fn ($x) => (int) $x)->all();
+        if ($conversation->super_participant) $ids[] = 0;
         abort_unless(count($ids) === 2 && in_array($uid, $ids), 403);
         $peer = current(array_diff($ids, [$uid]));
-        abort_unless(User::where('id', $peer)->where('is_active', true)->exists() && in_array($peer, Access::eligible($uid)), 403);
+        if ($peer !== 0) {
+            abort_unless(User::where('id', $peer)->where('is_active', true)->exists() && DB::table('user_product_access')->where('user_id', $peer)->where('product_slug', 'communication')->exists() && ($uid === 0 || in_array($peer, Access::eligible($uid))), 403);
+        } else abort_unless($conversation->super_participant, 403);
         self::expire();
         $id = DB::transaction(function () use ($uid, $peer, $v) {
+            if (($uid === 0 || $peer === 0) && DB::getDriverName() === 'pgsql') DB::select('SELECT pg_advisory_xact_lock(73126, 0)');
             User::whereIn('id', [$uid, $peer])->orderBy('id')->lockForUpdate()->get();
-            $callerBusy = DB::table('communication_calls')->whereIn('status', self::LIVE)->where(fn ($q) => $q->where('caller_id', $uid)->orWhere('callee_id', $uid))->exists();
+            $callerBusy = DB::table('communication_calls')->whereIn('status', self::LIVE)->where(fn ($q) => $q->where('caller_id', $uid ?: null)->orWhere('callee_id', $uid ?: null))->exists();
             abort_if($callerBusy, 409, 'You are already in a call.');
-            $busy = DB::table('communication_calls')->where('status', 'ringing')->where(fn ($q) => $q->where('caller_id', $peer)->orWhere('callee_id', $peer))->exists();
+            $busy = DB::table('communication_calls')->where('status', 'ringing')->where(fn ($q) => $q->where('caller_id', $peer ?: null)->orWhere('callee_id', $peer ?: null))->exists();
             $id = (string) Str::uuid();
-            DB::table('communication_calls')->insert(['id' => $id, 'conversation_id' => $v['conversation_id'], 'caller_id' => $uid, 'callee_id' => $peer, 'type' => $v['type'], 'status' => $busy ? 'busy' : 'ringing', 'ended_at' => $busy ? now() : null, 'caller_seen_at' => now(), 'callee_seen_at' => now(), 'created_at' => now(), 'updated_at' => now()]);
+            DB::table('communication_calls')->insert(['id' => $id, 'conversation_id' => $v['conversation_id'], 'caller_id' => $uid ?: null, 'callee_id' => $peer ?: null, 'type' => $v['type'], 'status' => $busy ? 'busy' : 'ringing', 'ended_at' => $busy ? now() : null, 'caller_seen_at' => now(), 'callee_seen_at' => now(), 'created_at' => now(), 'updated_at' => now()]);
 
             return $id;
         });
@@ -181,17 +188,18 @@ class CommunicationCallController extends Controller
     public function signal(Request $r, string $id)
     {
         $c = $this->call($r, $id);
-        $uid = (int) $r->user()->id;
+        $uid = $this->actor($r);
         $v = $r->validate(['kind' => 'required|in:answer,candidate,connected,heartbeat', 'answer' => 'nullable|array:type,sdp', 'answer.type' => 'required_if:kind,answer|in:answer', 'answer.sdp' => 'required_if:kind,answer|string|max:60000', 'candidate' => 'nullable|array:candidate,sdpMid,sdpMLineIndex,usernameFragment', 'candidate.candidate' => 'required_if:kind,candidate|string|max:4000', 'candidate.sdpMid' => 'nullable|string|max:100', 'candidate.sdpMLineIndex' => 'nullable|integer|min:0|max:100', 'candidate.usernameFragment' => 'nullable|string|max:256']);
         $kind = $v['kind'];
         abort_unless(in_array($c->status, self::LIVE), 409, 'This call has ended.');
         if ($kind === 'answer') {
             abort_unless($c->callee_id == $uid, 403);
             $ended = DB::transaction(function () use ($c, $id, $uid) {
+                if (($c->caller_id === null || $c->callee_id === null) && DB::getDriverName() === 'pgsql') DB::select('SELECT pg_advisory_xact_lock(73126, 0)');
                 User::whereIn('id', [$c->caller_id, $uid])->orderBy('id')->lockForUpdate()->get();
                 $changed = DB::table('communication_calls')->where('id', $id)->where('status', 'ringing')->where('created_at', '>', now()->subSeconds(60))->update(['status' => 'connecting', 'caller_seen_at' => now(), 'callee_seen_at' => now(), 'updated_at' => now()]);
                 abort_unless($changed, 409, 'Call already answered or expired.');
-                $others = DB::table('communication_calls')->where('id', '!=', $id)->whereIn('status', self::LIVE)->where(fn ($q) => $q->where('caller_id', $uid)->orWhere('callee_id', $uid))->get();
+                $others = DB::table('communication_calls')->where('id', '!=', $id)->whereIn('status', self::LIVE)->where(fn ($q) => $q->where('caller_id', $uid ?: null)->orWhere('callee_id', $uid ?: null))->get();
                 foreach ($others as $other) {
                     DB::table('communication_calls')->where('id', $other->id)->whereIn('status', self::LIVE)->update(['status' => $other->status === 'ringing' ? 'missed' : 'ended', 'ended_at' => now(), 'updated_at' => now()]);
                     Cache::forget('communication.call.offer.'.$other->id);
@@ -224,10 +232,10 @@ class CommunicationCallController extends Controller
         $status = $v['status'];
         if (in_array($c->status, self::LIVE)) {
             if ($status === 'rejected') {
-                abort_unless($c->callee_id == $r->user()->id && $c->status === 'ringing', 403);
+                abort_unless((int)$c->callee_id === $this->actor($r) && $c->status === 'ringing', 403);
             }
             if (in_array($status, ['cancelled', 'missed'])) {
-                abort_unless($c->caller_id == $r->user()->id && $c->status === 'ringing', 403);
+                abort_unless((int)$c->caller_id === $this->actor($r) && $c->status === 'ringing', 403);
             }
             if ($status === 'missed') {
                 abort_unless(strtotime($c->created_at) <= now()->subSeconds(55)->timestamp, 422);

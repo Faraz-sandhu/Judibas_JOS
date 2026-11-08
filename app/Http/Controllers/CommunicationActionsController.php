@@ -96,10 +96,13 @@ class CommunicationActionsController extends Controller
     public function forward(Request $r, int $id)
     {
         $m = $this->message($r, $id);
+        abort_if($m->protected_payload, 422, 'Protected messages cannot be forwarded.');
         $v = $r->validate(['conversation_id' => 'required|integer']);
         $c = Access::conversation($r, $v['conversation_id']);
         abort_unless($c->kind !== 'community' || \App\Services\PlatformAccess::administrator($r), 403, 'Only Super Admin can post to communities.');
         \App\Services\CommunicationMessagePolicy::enforce($r, $m->body);
+        $targetProtection = DB::table('communication_conversations')->where('id', $v['conversation_id'])->value('protection');
+        abort_if(json_decode($targetProtection ?? 'null', true)['future'] ?? false, 422, 'Forwarding into a protected chat is unavailable.');
         $path = null;
         if ($m->attachment_path) {
             abort_unless(\App\Services\CommunicationAttachmentStorage::available($m->attachment_path), 404, 'The attachment is no longer available.');
@@ -108,6 +111,8 @@ class CommunicationActionsController extends Controller
         }
         try {
             $mid = DB::transaction(function () use ($r, $m, $v, $path) {
+                $locked = DB::table('communication_conversations')->where('id', $v['conversation_id'])->lockForUpdate()->first();
+                abort_if(json_decode($locked->protection ?? 'null', true)['future'] ?? false, 422, 'Forwarding into a protected chat is unavailable.');
                 $id = DB::table('communication_messages')->insertGetId(['conversation_id' => $v['conversation_id'], 'sender_id' => Access::super($r) ? null : Auth::id(), 'sender_name' => Access::super($r) ? 'Super Admin' : Auth::user()->name, 'body' => $m->body, 'attachment_path' => $path, 'attachment_name' => $m->attachment_name, 'forwarded' => true, 'created_at' => now(), 'updated_at' => now()]);
                 DB::table('communication_conversations')->where('id', $v['conversation_id'])->update(['updated_at' => now()]);
 

@@ -44,7 +44,7 @@ class DashboardController extends Controller
         $taskStatusCounts = null;
         switch (true) {
             case $user->hasRole('admin'):
-                $roleCounts = DB::table('pms_role_users')
+                $roleCounts = DB::table('pms_role_users')->where(function($q){\App\Modules\Pms\Services\PmsCompanyContext::users($q,'pms_role_users.user_id');})
                     ->join('pms_roles', 'pms_roles.id', '=', 'pms_role_users.role_id')
                     ->selectRaw("COUNT(DISTINCT CASE WHEN pms_roles.role_key = 'admin' THEN pms_role_users.user_id END) as admins")
                     ->selectRaw("COUNT(DISTINCT CASE WHEN pms_roles.role_key = 'project_manager' THEN pms_role_users.user_id END) as managers")
@@ -274,6 +274,7 @@ class DashboardController extends Controller
             ->join('pms_role_users', 'pms_role_users.user_id', '=', 'pms_user_departments.user_id')
             ->join('pms_roles', 'pms_roles.id', '=', 'pms_role_users.role_id')
             ->whereIn('pms_user_departments.dept_id', $departmentIds)
+            ->where(function($q){\App\Modules\Pms\Services\PmsCompanyContext::users($q,'pms_user_departments.user_id');})
             ->selectRaw("COUNT(DISTINCT CASE WHEN pms_roles.role_key = 'team_leader' THEN pms_role_users.user_id END) as team_leaders")
             ->selectRaw("COUNT(DISTINCT CASE WHEN pms_roles.role_key NOT IN ('team_leader','project_manager') THEN pms_role_users.user_id END) as team_members")
             ->first();
@@ -285,7 +286,7 @@ class DashboardController extends Controller
         $user = Auth::user();
         if ($user->hasRole('team_leader')) {
             $departmentIds = $user->departments()->pluck('pms_departments.id');
-            $teamMembers = User::whereHas('departments', function ($query) use ($departmentIds) {
+            $teamMembers = User::where(function($q){\App\Modules\Pms\Services\PmsCompanyContext::users($q);})->whereHas('departments', function ($query) use ($departmentIds) {
                 $query->whereIn('pms_departments.id', $departmentIds);
             })->whereHas('roles', function ($query) {
                 $query->whereNotIn('role_key', ['team_leader', 'project_manager']);
@@ -379,7 +380,7 @@ class DashboardController extends Controller
         $canViewAll = $actor->hasRole('admin') || $actor->hasRole('project_manager');
         $departmentIds = $actor->departments()->pluck('pms_departments.id');
 
-        $users = User::query()
+        $users = User::query()->where(function($q){\App\Modules\Pms\Services\PmsCompanyContext::users($q);})
             ->with('roles')
             ->where('status', 1)
             ->whereDoesntHave('roles', fn ($roles) => $roles->where('role_key', 'admin'))

@@ -14,6 +14,11 @@ class CommunicationAccess
         return (bool) $r->session()->get('judibas_admin');
     }
 
+    public static function personal(Request $r): bool
+    {
+        return self::super($r) && $r->input('mode') === 'personal' && ! $r->filled('view_user');
+    }
+
     public static function authorize(Request $r): void
     {
         if (\App\Services\PlatformAccess::administrator($r)) {
@@ -70,7 +75,7 @@ class CommunicationAccess
     public static function mutable(Request $r): void
     {
         self::authorize($r);
-        abort_if($r->filled('view_user'), 403, 'Employee review is read-only.');
+        abort_if($r->filled('view_user') || (self::super($r) && $r->input('mode') === 'review'), 403, 'Employee review is read-only.');
     }
 
     public static function subject(Request $r): ?int
@@ -91,6 +96,7 @@ return self::super($r) ? null : (int) Auth::id();
     public static function scope($query, ?int $uid): void
     {
         if ($uid === null) {
+            if (self::personal(request())) $query->where(fn ($q) => $q->where('c.super_participant', true)->orWhere('c.kind', 'community'));
             return;
         }
         $eligible = self::eligible($uid);
@@ -100,7 +106,7 @@ return self::super($r) ? null : (int) Auth::id();
                     $m->selectRaw('1')->from('communication_members as cm')->whereColumn('cm.conversation_id', 'c.id')->where('cm.user_id', $uid);
                 });
                 $q->where(function ($d) use ($uid, $eligible) {
-                    $d->where('c.kind', 'group')->orWhereExists(function ($m) use ($uid, $eligible) {
+                    $d->where('c.kind', 'group')->orWhere('c.super_participant', true)->orWhereExists(function ($m) use ($uid, $eligible) {
                         $m->selectRaw('1')->from('communication_members as peer')->whereColumn('peer.conversation_id', 'c.id')->where('peer.user_id', '!=', $uid)->whereIn('peer.user_id', $eligible);
                     });
                 });

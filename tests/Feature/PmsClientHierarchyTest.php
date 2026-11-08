@@ -50,9 +50,10 @@ class PmsClientHierarchyTest extends TestCase {
   $this->patchJson('/pms/api/tasks/'.$task.'/board',['sprint_id'=>$b])->assertUnprocessable();
   $this->deleteJson('/pms/api/sprints/'.$a)->assertOk();$this->assertDatabaseHas('pms_tasks',['id'=>$task,'department_id'=>$dev,'sprint_id'=>null]);
  }
- public function test_project_manager_with_view_all_sees_every_company_without_project_membership():void {
-  [, $company]=$this->company('Summit Company');$client=$this->client($company,'Summit Health');$department=$this->department('Summit Marketing');$project=$this->project($client,'Summit Campaign',[$department]);$task=$this->task($project,$department,'Campaign launch');
+ public function test_project_manager_with_view_all_sees_assigned_company_without_project_membership():void {
+  [$platform, $company]=$this->company('Summit Company');$client=$this->client($company,'Summit Health');$department=$this->department('Summit Marketing');$project=$this->project($client,'Summit Campaign',[$department]);$task=$this->task($project,$department,'Campaign launch');
   $u=User::factory()->create(['is_active'=>true,'status'=>1]);DB::table('user_product_access')->insert(['user_id'=>$u->id,'product_slug'=>'projects']);DB::table('pms_role_users')->insert(['user_id'=>$u->id,'role_id'=>DB::table('pms_roles')->where('role_key','project_manager')->value('id')]);
+  DB::table('communication_company_memberships')->insert(['user_id'=>$u->id,'company_id'=>$platform]);
   $this->withSession(['judibas_admin'=>false])->actingAs($u);$this->getJson('/pms/api/hierarchy')->assertOk()->assertJsonPath('show_companies',true)->assertJsonFragment(['name'=>'Summit Company']);$this->getJson('/pms/api/projects/'.$project.'?department='.$department)->assertOk()->assertJsonFragment(['title'=>'Campaign launch']);$this->getJson('/pms/api/tasks/'.$task)->assertOk();
  }
  public function test_subtask_assignment_grants_only_its_parent_project_in_the_selected_company():void {

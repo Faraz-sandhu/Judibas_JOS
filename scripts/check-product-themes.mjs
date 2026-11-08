@@ -1,0 +1,36 @@
+import {chromium,expect} from '@playwright/test';
+import assert from 'node:assert/strict';
+import {mkdir} from 'node:fs/promises';
+const origin='http://127.0.0.1:8000';
+const groups=[['pms','PMS','projects',['Skyinfinit','Cruxlo','Wecoma']],['services','Services Finance & Accounting','accounts',['Judibas GOC','Skyinfinit','Cruxlo','Suivillion','Corzella','Sincwell','True North','Oxyien']],['ecommerce','E-commerce Finance & Accounting','accounts',['Bedizen','Judibas Store']],['reception','Reception System','reception',['Backend - FSD','Sales Office - FSD','Sales Office - MUL']],['crm','CRM','crm',['True North','Yubis','Suivillion','Cruxlo','Corzella','Skyinfinit','Oxyien','Sincwell']],['physical','Physical Business Finance & Accounting','accounts',['Judibas Canteen','NLTPL','China bedding store','True Water','Gaming Lounge']],['hrm','HRM','hr',['Judibas GOC','Skyinfinit','True North','Suivillion','Cruxlo','Corzella','Sincwell','Oxyien']],['css','CSS','css',['Corzella','Cruxlo','Suivillion','Oxyien','Sincwell']],['lms','LMS','learning',['Yubis']]].map(([id,name,slug,names])=>({id,name,slug,description:'Company workspace',planned:!['projects','accounts'].includes(slug),allHref:['projects','accounts'].includes(slug)?'/accounting?company_id=all':null,companies:names.map((name,i)=>({name,href:['projects','accounts'].includes(slug)?'/accounting?company_id='+i:null}))}));
+const browser=await chromium.launch({channel:'msedge',headless:true});
+try{
+ const context=await browser.newContext({serviceWorkers:'block'});
+ await context.addInitScript(({groups})=>{let portal;Object.defineProperty(window,'portal',{configurable:true,get(){return portal;},set(value){portal={...value,admin:true,administrator:true,settingsPage:location.pathname==='/admin',productsPage:location.pathname==='/products',product:null,page:null,productsTheme:new URL(location.href).searchParams.get('theme')||'classic',catalogueGroups:groups};}});},{groups});
+ const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));await mkdir('.preview',{recursive:true});
+ for(const theme of (process.env.SETTINGS_ONLY?[]:process.env.THEME_ONLY?[process.env.THEME_ONLY]:['workspace','directory','classic','disclosure']))for(const mode of ['light','dark'])for(const width of [375,768,1440,1920]){
+  await page.setViewportSize({width,height:1000});await page.addInitScript(mode=>localStorage.setItem('judibas-theme-v2',mode),mode);await page.goto(origin+'/products?theme='+theme,{waitUntil:'networkidle'});
+  await expect(page.locator(theme==='classic'?'.catalogue-page':'.product-directory')).toBeVisible();
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`${theme}/${mode}/${width} page overflow`);
+  if(theme==='disclosure'){
+   await expect(page.locator('details.pd-card[open]')).toHaveCount(0);
+   const card=page.locator('details.pd-card').filter({has:page.getByRole('heading',{name:'PMS',exact:true})});
+   const summary=card.locator('summary');await summary.click();await expect(card).toHaveAttribute('open','');await expect(card.getByText('Skyinfinit',{exact:true})).toBeVisible();
+   await summary.focus();await page.keyboard.press('Enter');await expect(card).not.toHaveAttribute('open','');await expect(card.getByText('Skyinfinit',{exact:true})).toBeHidden();
+   await summary.focus();await page.keyboard.press('Space');await expect(card).toHaveAttribute('open','');
+   const universalCard=page.locator('details.pd-universal');await universalCard.locator('summary').click();await expect(universalCard).toHaveAttribute('open','');await expect(card).not.toHaveAttribute('open','');await expect(page.locator('details.pd-card[open]')).toHaveCount(1);
+   await summary.focus();await page.keyboard.press('Enter');await expect(card).toHaveAttribute('open','');await expect(universalCard).not.toHaveAttribute('open','');await expect(page.locator('details.pd-card[open]')).toHaveCount(1);
+   await page.getByRole('searchbox').fill('Wecoma');await expect(page.getByRole('heading',{name:'PMS',exact:true})).toBeVisible();await expect(page.getByText('Wecoma',{exact:true})).toBeVisible();
+   await page.getByRole('searchbox').fill('no-such-company-987');await expect(page.getByRole('status')).toContainText('No products or companies');
+   await page.getByRole('searchbox').fill('');await expect(page.locator('details.pd-card[open]')).toHaveCount(0);
+   if(mode==='light'&&width===1440)await page.screenshot({path:'.preview/products-disclosure-collapsed.png',fullPage:true});
+   await page.getByRole('searchbox').fill('Cruxlo');await expect(page.locator('details.pd-card[open]')).toHaveCount(1);
+   await page.getByRole('searchbox').fill('');await card.locator('summary').click();await expect(page.locator('details.pd-card[open]')).toHaveCount(1);
+  }
+  if(theme!=='classic')assert.deepEqual(await page.locator('.pd-company,.pd-app').evaluateAll(nodes=>nodes.filter(n=>n.getClientRects().length&&n.scrollWidth>n.clientWidth+2).map(n=>n.textContent)),[],`${theme}/${width} button overflow`);
+  if(mode==='light'&&width===1440)await page.screenshot({path:'.preview/products-'+theme+'.png',fullPage:true});
+ }
+ let saved='classic';await page.route(/\/admin\/api(?:\/|$)/,route=>{const url=new URL(route.request().url());if(url.pathname==='/admin/api/platform-settings/products'){saved=route.request().postDataJSON().theme;return route.fulfill({json:{message:'Products page theme saved.'}});}if(url.pathname==='/admin/api/platform-settings')return route.fulfill({json:{mail:{scheme:'smtp',port:587},realtime:{enabled:false,provider:'reverb'},products:{theme:saved}}});if(url.pathname.endsWith('/backups'))return route.fulfill({json:{enabled:false,frequency:'daily',time:'02:00',timezone:'Asia/Karachi',recipients:''}});return route.fulfill({json:{users:[],companies:[],products:[],blogs:[],pages:{},announcement:{},daymark_departments:[],daymark_roles:[],daymark_role_matrix:{roles:[]},daymark_managers:[],canteen_levels:[],accounting_roles:[],pms_roles:[],pms_departments:[],pms_tasks:[],groups:[]}});});
+ await page.route(origin+'/admin',async route=>{const response=await page.request.get(origin+'/');return route.fulfill({contentType:'text/html',body:await response.text()});});
+ await page.goto(origin+'/admin#settings',{waitUntil:'networkidle'});await page.getByRole('button',{name:'Products page',exact:true}).click();await page.screenshot({path:'.preview/product-theme-settings.png',fullPage:true});await expect(page.getByRole('heading',{name:'Products page appearance'})).toBeVisible();await expect(page.getByRole('heading',{name:'Email server',exact:true})).toBeHidden();await page.getByRole('radio',{name:/4. Expandable Cards/}).check();await page.getByRole('button',{name:'Save Products theme',exact:true}).click();await expect.poll(()=>saved).toBe('disclosure');await page.reload({waitUntil:'networkidle'});await page.getByRole('button',{name:'Products page',exact:true}).click();await expect(page.getByRole('radio',{name:/4. Expandable Cards/})).toBeChecked();assert.deepEqual(errors,[]);console.log(process.env.SETTINGS_ONLY?'PASS: settings save/reload and tab isolation.':`PASS: ${process.env.THEME_ONLY?'8':'32'} theme/viewport/appearance checks, exclusive accordion mouse/keyboard/search checks and settings save/reload.`);
+}finally{await browser.close();}

@@ -20,6 +20,10 @@ Route::get('/products', [PortalController::class, 'index']);
 Route::get('/products/{slug}', [PortalController::class, 'index']);
 Route::get('/careers', [\App\Http\Controllers\CvBankController::class, 'careers']);
 Route::post('/careers/apply', [\App\Http\Controllers\CvBankController::class, 'apply'])->middleware('throttle:10,1');
+Route::get('/careers/{companySlug}/jobs/{id}', [\App\Http\Controllers\CvBankController::class, 'jobDetails'])->whereNumber('id');
+Route::get('/careers/{companySlug}', [\App\Http\Controllers\CvBankController::class, 'careers']);
+Route::post('/careers/{companySlug}/apply', [\App\Http\Controllers\CvBankController::class, 'apply'])->middleware('throttle:10,1');
+Route::post('/cv-bank/company-pages', [\App\Http\Controllers\CvBankController::class, 'saveCompanyPage']);
 Route::get('/cv-bank/applications/{id}/cv', [\App\Http\Controllers\CvBankController::class, 'download'])->whereNumber('id');
 Route::get('/cv-bank/applications/{id}/preview', [\App\Http\Controllers\CvBankController::class, 'preview'])->whereNumber('id');
 Route::get('/cv-bank', [\App\Http\Controllers\CvBankController::class, 'dashboard']);
@@ -41,6 +45,7 @@ Route::post('/admin/login', [PortalController::class, 'login'])->middleware('thr
 Route::post('/admin/settings', [PortalController::class, 'save']);
 Route::post('/admin/logout', [PortalController::class, 'logout']);
 Route::get('/admin/api', [AdminController::class, 'data']);
+Route::post('/admin/api/platform-settings/products', [\App\Http\Controllers\PlatformSettingsController::class, 'products']);
 Route::get('/admin/api/platform-settings', [\App\Http\Controllers\PlatformSettingsController::class, 'index']);
 Route::get('/admin/api/platform-settings/backups', [\App\Http\Controllers\BackupSettingsController::class, 'show']);
 Route::post('/admin/api/platform-settings/backups', [\App\Http\Controllers\BackupSettingsController::class, 'save']);
@@ -147,3 +152,32 @@ require __DIR__.'/canteen.php';
 require __DIR__.'/daymark.php';
 
 require __DIR__.'/accounting.php';
+
+// Encrypted chat has separate storage and participant-only endpoints.
+Route::prefix('communication/api/encrypted')->group(function () {
+ $controller=\App\Http\Controllers\CommunicationEncryptedController::class;
+ Route::get('/',[$controller,'index']);
+ Route::post('/devices',[$controller,'register'])->middleware('throttle:15,1');
+ Route::post('/threads',[$controller,'create'])->middleware('throttle:15,1');
+ Route::get('/threads/{id}/messages',[$controller,'messages'])->whereUuid('id');
+ Route::post('/threads/{id}/messages',[$controller,'send'])->whereUuid('id')->middleware('throttle:60,1');
+ Route::post('/threads/{id}/signals',[$controller,'sendSignal'])->whereUuid('id')->middleware('throttle:60,1');
+ Route::get('/threads/{id}/signals/{signal}',[$controller,'getSignal'])->whereUuid('id')->whereUuid('signal');
+});
+
+// Register after concrete API, receipt and invitation routes.
+Route::get('/{workspace}/{companySlug}', [\App\Http\Controllers\CompanyWorkspaceController::class,'show'])
+    ->where('workspace','pms|accounting|canteen|cv-bank|daymark')->where('companySlug','[a-z0-9]+(?:-[a-z0-9]+)*');
+
+Route::get('/communication/api/conversations/{id}/protection', [\App\Http\Controllers\CommunicationProtectionController::class, 'show'])->whereNumber('id');
+Route::put('/communication/api/conversations/{id}/protection', [\App\Http\Controllers\CommunicationProtectionController::class, 'save'])->whereNumber('id');
+
+Route::post('/communication/api/protection-devices', [\App\Http\Controllers\CommunicationKeyAccessController::class, 'register'])->middleware('throttle:20,1');
+Route::get('/communication/api/conversations/{id}/key-access', [\App\Http\Controllers\CommunicationKeyAccessController::class, 'show'])->whereNumber('id');
+Route::post('/communication/api/conversations/{id}/key-request', [\App\Http\Controllers\CommunicationKeyAccessController::class, 'requestAccess'])->whereNumber('id')->middleware('throttle:5,1');
+Route::post('/communication/api/conversations/{id}/key-delivery', [\App\Http\Controllers\CommunicationKeyAccessController::class, 'deliver'])->whereNumber('id')->middleware('throttle:20,1');
+Route::post('/communication/api/conversations/{id}/key-acknowledge', [\App\Http\Controllers\CommunicationKeyAccessController::class, 'acknowledge'])->whereNumber('id');
+Route::post('/communication/api/conversations/{id}/key-recovery', [\App\Http\Controllers\CommunicationKeyAccessController::class, 'recovery'])->whereNumber('id');
+
+Route::post('/communication/api/conversations/{id}/protection/rotate', [\App\Http\Controllers\CommunicationProtectionController::class, 'rotate'])->whereNumber('id')->middleware('throttle:5,1');
+Route::get('/communication/api/conversations/{id}/protection/history/{key}', [\App\Http\Controllers\CommunicationProtectionController::class, 'history'])->whereNumber('id')->whereUuid('key');

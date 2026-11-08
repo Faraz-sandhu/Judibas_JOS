@@ -25,12 +25,383 @@ class AccountingLedgerTest extends TestCase
         $this->withSession(['judibas_admin' => true]);
         $this->postJson('/accounting/api/initialize', ['company_id' => $this->company])->assertOk();
         $this->accounts = DB::table('accounting_accounts')->where('company_id', $this->company)->pluck('id', 'code')->all();
-        $this->postJson('/accounting/api/books', ['company_id' => $this->company, 'version' => 0, 'currency' => 'PKR', 'start_date' => now()->subYear()->toDateString()])->assertOk();
+        foreach (['1000' => '01', '1100' => '01-01', '1110' => '01-01-01', '1120' => '01-01-02', '1130' => '01-01-03', '2000' => '02', '2100' => '02-01', '2110' => '02-01-01', '3000' => '03', '3100' => '03-01', '4000' => '04', '4100' => '04-01', '5000' => '05', '5100' => '05-01', '5110' => '05-01-01'] as $legacy => $code) { $this->accounts[$legacy] = $this->accounts[$code]; }
+        $this->postJson('/accounting/api/books', ['company_id' => $this->company, 'version' => 0, 'currency' => 'PKR', 'approval_required' => false, 'start_date' => now()->subYear()->toDateString()])->assertOk();
+    }
+
+    public function test_chart_rolls_up_posted_amounts_and_excludes_drafts(): void
+    {
+        $this->create($this->body('900.00'), false);
+        $this->create($this->body('125.75'));
+        $rows = collect($this->getJson('/accounting/api/data?company_id='.$this->company)->assertOk()->json('accounts'))->keyBy('id');
+        foreach (['1000', '1100', '1110'] as $code) {
+            $this->assertSame('125.75', $rows[$this->accounts[$code]]['debit']);
+            $this->assertSame('125.75', $rows[$this->accounts[$code]]['balance']);
+            $this->assertSame('Dr', $rows[$this->accounts[$code]]['balance_side']);
+        }
+        $this->assertSame('125.75', $rows[$this->accounts['4000']]['credit']);
+        $this->assertSame('Cr', $rows[$this->accounts['4000']]['balance_side']);
+        $this->assertSame('0.00', $rows[$this->accounts['3000']]['balance']);
+    }
+
+    public function test_journals_can_be_saved_and_posted_without_a_description(): void
+    {
+        foreach (['', null, '   '] as $description) {
+            $body = $this->body('25.00', ['remarks' => $description]);
+            $journal = $this->create($body);
+            $this->assertSame('', $journal['remarks']);
+            $this->assertSame('posted', $journal['status']);
+            $this->postJson('/accounting/api/journals', $body)->assertOk()->assertJsonPath('journal.id', $journal['id']);
+        }
+        $body = $this->body('25.00');
+        unset($body['remarks']);
+        $this->assertSame('', $this->create($body)['remarks']);
+    }
+
+    public function test_cash_vouchers_post_once_filter_print_and_reverse_in_the_same_ledger(): void
+    {
+        $receipt = $this->body('500.25', ['kind' => 'cash_receipt', 'voucher_person' => 'Walk-in service customer']);
+        $r = $this->create($receipt);
+        $this->assertStringStartsWith('CRV-', $r['number']);
+        $this->postJson('/accounting/api/journals', $receipt)->assertOk()->assertJsonPath('journal.id', $r['id']);
+        $this->get('/accounting/vouchers/'.$r['id'].'/print?company_id='.$this->company)->assertOk()->assertSee('Cash Receipt Voucher')->assertSee('Walk-in service customer');
+        $payment = $this->body('100.10', ['kind' => 'cash_payment', 'voucher_person' => 'Office vendor']);
+        $payment['lines'] = [['account_id' => $this->accounts['1110'], 'debit' => '0.00', 'credit' => '100.10'], ['account_id' => $this->accounts['5110'], 'debit' => '100.10', 'credit' => '0.00']];
+        $p = $this->create($payment);
+        $this->assertStringStartsWith('CPV-', $p['number']);
+        $this->report('ledger', ['account_id' => $this->accounts['1110']])->assertOk()->assertJsonPath('closing', '400.15');
+        $this->getJson('/accounting/api/journals?company_id='.$this->company.'&kind=cash_receipt')->assertOk()->assertJsonPath('total', 1)->assertJsonPath('data.0.id', $r['id']);
+        $this->getJson('/accounting/api/journals?company_id='.$this->company)->assertOk()->assertJsonPath('total', 0);
+        $this->postJson('/accounting/api/journals/'.$p['id'].'/reverse', ['company_id' => $this->company, 'version' => $p['version'], 'posting_date' => now()->toDateString(), 'reason' => 'Incorrect cash payment'])->assertOk();
+        $this->report('ledger', ['account_id' => $this->accounts['1110']])->assertOk()->assertJsonPath('closing', '500.25');
+        $this->report('trial')->assertOk()->assertJsonPath('summary.closing_difference', '0.00');
+    }
+
+    public function test_cash_vouchers_reject_missing_person_wrong_direction_and_non_cash_accounts(): void
+    {
+        $body = $this->body('50.00', ['kind' => 'cash_receipt']);
+        $this->postJson('/accounting/api/journals', $body)->assertUnprocessable();
+        $body['voucher_person'] = 'Test person';
+        $body['kind'] = 'cash_payment';
+        $this->postJson('/accounting/api/journals', $body)->assertUnprocessable();
+        $body['kind'] = 'cash_receipt';
+        $body['lines'][0]['account_id'] = $this->accounts['1120'];
+        $this->postJson('/accounting/api/journals', $body)->assertUnprocessable();
+        $body['lines'][0]['account_id'] = $this->accounts['1110'];
+        $body['lines'][1]['account_id'] = $this->accounts['1130'];
+        $this->postJson('/accounting/api/journals', $body)->assertUnprocessable();
+        $body['lines'][1]['account_id'] = $this->accounts['4100'];
+        $body['lines'][1]['credit'] = '49.00';
+        $this->postJson('/accounting/api/journals', $body)->assertUnprocessable();
+    }
+
+    public function test_trial_formats_split_opening_sides_and_export_only_selected_amount_columns(): void
+    {
+        $body = $this->body('100.25', ['kind' => 'opening', 'posting_date' => now()->subYear()->toDateString()]);
+        $body['lines'][1]['account_id'] = $this->accounts['3100'];
+        $this->create($body);
+        $this->create($this->body('50.10'));
+        $rows = collect($this->report('trial')->assertOk()->json('rows'))->keyBy('account_id');
+        $this->assertSame('100.25', $rows[$this->accounts['1110']]['opening_debit']);
+        $this->assertSame('0.00', $rows[$this->accounts['1110']]['opening_credit']);
+        $this->assertSame('100.25', $rows[$this->accounts['3100']]['opening_credit']);
+        $this->assertSame('150.35', $rows[$this->accounts['1110']]['closing_debit']);
+        foreach (['2' => 5, '6' => 9] as $format => $columns) {
+            $response = $this->report('trial', ['export' => 'csv', 'trial_columns' => (string) $format])->assertOk();
+            $csv = $response->streamedContent();
+            $header = str_getcsv(explode("\n", trim($csv))[0]);
+            $this->assertCount($columns, $header);
+            $this->assertSame('Closing debit', $header[count($header) - 2]);
+            if ((string) $format === '6') $this->assertContains('Opening credit', $header);
+            else $this->assertNotContains('Opening credit', $header);
+        }
+    }
+
+    private function cashPayment(string $amount, array $replace = []): array
+    {
+        return $this->body($amount, array_replace(['kind' => 'cash_payment', 'voucher_person' => 'Cash vendor', 'lines' => [
+            ['account_id' => $this->accounts['1110'], 'debit' => '0.00', 'credit' => $amount],
+            ['account_id' => $this->accounts['5110'], 'debit' => $amount, 'credit' => '0.00'],
+        ]], $replace));
+    }
+
+    public function test_cash_payment_cannot_be_created_using_zero_draft_or_later_funds(): void
+    {
+        $payment = $this->cashPayment('10.00');
+        $this->postJson('/accounting/api/journals', $payment)->assertUnprocessable()->assertJsonFragment(['message' => 'Insufficient cash balance on '.now()->toDateString().'. Available: PKR 0.00. Payment: PKR 10.00.']);
+        $this->assertDatabaseMissing('accounting_journals', ['request_key' => $payment['request_key']]);
+        $this->create($this->body('100.00'), false);
+        $this->postJson('/accounting/api/journals', $payment)->assertUnprocessable();
+        $this->create($this->body('100.00'));
+        $this->postJson('/accounting/api/journals', $this->cashPayment('10.00', ['posting_date' => now()->subDay()->toDateString()]))->assertUnprocessable();
+        $this->postJson('/accounting/api/journals', $this->cashPayment('100.01'))->assertUnprocessable();
+    }
+
+    public function test_posting_rechecks_cash_and_exact_balance_payment_is_idempotent(): void
+    {
+        $this->create($this->body('100.00'));
+        $pending = $this->create($this->cashPayment('80.00'), false);
+        $this->create($this->cashPayment('60.00'));
+        $this->postJson('/accounting/api/journals/'.$pending['id'].'/post', ['company_id' => $this->company, 'version' => $pending['version']])->assertUnprocessable()->assertJsonFragment(['message' => 'Insufficient cash balance on '.now()->toDateString().'. Available: PKR 40.00. Payment: PKR 80.00.']);
+        $this->assertDatabaseHas('accounting_journals', ['id' => $pending['id'], 'status' => 'draft']);
+        $body = $this->cashPayment('40.00');
+        $paid = $this->create($body);
+        $this->postJson('/accounting/api/journals', $body)->assertOk()->assertJsonPath('journal.id', $paid['id']);
+        $this->postJson('/accounting/api/journals/'.$paid['id'].'/post', ['company_id' => $this->company, 'version' => $paid['version']])->assertOk();
+        $this->report('ledger', ['account_id' => $this->accounts['1110']])->assertOk()->assertJsonPath('closing', '0.00');
+    }
+
+    public function test_reversed_cash_receipts_do_not_supply_available_funds(): void
+    {
+        $receipt = $this->create($this->body('100.00', ['kind' => 'cash_receipt', 'voucher_person' => 'Walk-in customer']));
+        $this->postJson('/accounting/api/journals/'.$receipt['id'].'/reverse', ['company_id' => $this->company, 'version' => $receipt['version'], 'posting_date' => now()->toDateString(), 'reason' => 'Receipt cancelled'])->assertOk();
+        $this->postJson('/accounting/api/journals', $this->cashPayment('1.00'))->assertUnprocessable();
+        // Receipts can still be created when the cash balance is zero.
+        $this->create($this->body('20.00', ['kind' => 'cash_receipt', 'voucher_person' => 'Another customer']));
+    }
+
+    public function test_cash_profit_recognises_direct_cash_and_bank_entries_and_flags_unallocated_settlements(): void
+    {
+        $this->create($this->body('40.25'));
+        $this->create($this->body('10.00', ['kind' => 'cash_receipt', 'voucher_person' => 'Cash customer']));
+        $this->create($this->cashPayment('6.00'));
+        $liability = DB::table('accounting_accounts')->insertGetId(['company_id' => $this->company, 'parent_id' => $this->accounts['2000'], 'code' => '02-02', 'name' => 'Salaries payable', 'root_type' => 'Liability', 'account_type' => 'General']);
+        $this->create($this->body('100.00', ['lines' => [
+            ['account_id' => $this->accounts['5110'], 'debit' => '100.00', 'credit' => '0.00'],
+            ['account_id' => $liability, 'debit' => '0.00', 'credit' => '100.00'],
+        ]]));
+        $settlement = $this->create($this->body('50.00', ['lines' => [
+            ['account_id' => $liability, 'debit' => '50.00', 'credit' => '0.00'],
+            ['account_id' => $this->accounts['1120'], 'debit' => '0.00', 'credit' => '50.00'],
+        ]]));
+        $this->report('profit', ['basis' => 'cash'])->assertOk()->assertJsonPath('summary.income', '50.25')->assertJsonPath('summary.expense', '6.00')->assertJsonPath('summary.profit', '44.25')->assertJsonPath('cash_basis_complete', false)->assertJsonCount(1, 'cash_basis_review')->assertJsonPath('cash_basis_review.0.id', $settlement['id']);
+        $this->report('profit')->assertOk()->assertJsonPath('basis', 'accrual')->assertJsonPath('summary.expense', '106.00');
+        $this->assertStringContainsString('Excluded - needs review', $this->report('profit', ['basis' => 'cash', 'export' => 'csv'])->assertOk()->streamedContent());
+    }
+
+    public function test_cash_profit_reverses_direct_transactions_and_excludes_capital_and_transfers(): void
+    {
+        $receipt = $this->create($this->body('40.25'));
+        $this->create($this->body('100.00', ['lines' => [
+            ['account_id' => $this->accounts['1120'], 'debit' => '100.00', 'credit' => '0.00'],
+            ['account_id' => $this->accounts['3100'], 'debit' => '0.00', 'credit' => '100.00'],
+        ]]));
+        $this->create($this->body('10.00', ['lines' => [
+            ['account_id' => $this->accounts['1110'], 'debit' => '10.00', 'credit' => '0.00'],
+            ['account_id' => $this->accounts['1120'], 'debit' => '0.00', 'credit' => '10.00'],
+        ]]));
+        $this->report('profit', ['basis' => 'cash'])->assertOk()->assertJsonPath('summary.income', '40.25')->assertJsonPath('cash_basis_complete', true);
+        $this->postJson('/accounting/api/journals/'.$receipt['id'].'/reverse', ['company_id' => $this->company, 'version' => $receipt['version'], 'posting_date' => now()->toDateString(), 'reason' => 'Cancel direct receipt'])->assertOk();
+        $this->report('profit', ['basis' => 'cash'])->assertOk()->assertJsonPath('summary.income', '0.00')->assertJsonPath('summary.profit', '0.00');
+        $this->withSession(['judibas_admin' => false]);
+        $this->report('profit', ['basis' => 'cash'])->assertForbidden();
+    }
+
+    private function unallocatedCash(string $date = ''): array
+    {
+        $liability = DB::table('accounting_accounts')->insertGetId(['company_id' => $this->company, 'parent_id' => $this->accounts['2000'], 'code' => '02-02', 'name' => 'Salary accrual', 'root_type' => 'Liability', 'account_type' => 'General']);
+        return $this->create($this->body('50.00', ['posting_date' => $date ?: now()->toDateString(), 'remarks' => 'Salary cash settlement', 'lines' => [
+            ['account_id' => $liability, 'debit' => '50.00', 'credit' => '0.00'],
+            ['account_id' => $this->accounts['1120'], 'debit' => '0.00', 'credit' => '50.00'],
+        ]]));
+    }
+
+    private function cashReviewBody(array $replace = []): array
+    {
+        return array_replace(['company_id' => $this->company, 'version' => 0, 'decision' => 'allocate', 'note' => 'This cash payment settles salary expense.', 'outside_amount' => '0.00',
+            'allocations' => [['account_id' => $this->accounts['5110'], 'amount' => '50.00', 'refund' => false]]], $replace);
+    }
+
+    public function test_cash_basis_review_resolves_updates_and_audits_without_changing_the_ledger(): void
+    {
+        $journal = $this->unallocatedCash();
+        $before = DB::table('accounting_journal_lines')->where('journal_id', $journal['id'])->get()->toJson();
+        $url = '/accounting/api/cash-basis-reviews/'.$journal['id'];
+        $this->getJson($url.'?company_id='.$this->company)->assertOk()->assertJsonPath('can_resolve', true)->assertJsonPath('net_cash', '-50.00');
+        $this->postJson($url, $this->cashReviewBody())->assertOk();
+        $this->report('profit', ['basis' => 'cash'])->assertOk()->assertJsonPath('summary.expense', '50.00')->assertJsonPath('cash_basis_complete', true)->assertJsonCount(1, 'cash_basis_resolved');
+        $this->report('profit')->assertOk()->assertJsonPath('summary.expense', '0.00');
+        $this->assertSame($before, DB::table('accounting_journal_lines')->where('journal_id', $journal['id'])->get()->toJson());
+        $this->assertDatabaseHas('accounting_audits', ['company_id' => $this->company, 'action' => 'Cash-basis allocation saved', 'subject' => $journal['number']]);
+        $this->postJson($url, $this->cashReviewBody())->assertConflict();
+        $account = DB::table('accounting_accounts')->find($this->accounts['5110']);
+        $this->deleteJson('/accounting/api/accounts/'.$account->id, ['company_id' => $this->company, 'version' => $account->version])->assertUnprocessable();
+        $this->postJson($url, $this->cashReviewBody(['version' => 1, 'decision' => 'outside', 'allocations' => [], 'note' => 'Actually repayment of a business loan.']))->assertOk();
+        $this->getJson($url.'?company_id='.$this->company)->assertOk()->assertJsonPath('review.version', 2)->assertJsonPath('review.decision', 'outside');
+        $this->report('profit', ['basis' => 'cash'])->assertOk()->assertJsonPath('summary.expense', '0.00')->assertJsonPath('cash_basis_complete', true);
+    }
+
+    public function test_cash_basis_reviews_validate_reconciliation_and_account_selection(): void
+    {
+        $journal = $this->unallocatedCash();
+        $url = '/accounting/api/cash-basis-reviews/'.$journal['id'];
+        foreach (['49.99', '0.00', '50.001', '-50.00', '1e2'] as $amount) {
+            $this->postJson($url, $this->cashReviewBody(['allocations' => [['account_id' => $this->accounts['5110'], 'amount' => $amount, 'refund' => false]]]))->assertUnprocessable();
+        }
+        foreach (['5000', '1120'] as $code) {
+            $this->postJson($url, $this->cashReviewBody(['allocations' => [['account_id' => $this->accounts[$code], 'amount' => '50.00', 'refund' => false]]]))->assertUnprocessable();
+        }
+        $this->postJson($url, $this->cashReviewBody(['note' => '     ']))->assertUnprocessable();
+        $this->postJson($url, $this->cashReviewBody(['decision' => 'outside']))->assertUnprocessable();
+        $this->assertDatabaseMissing('accounting_cash_basis_reviews', ['journal_id' => $journal['id']]);
+        $this->postJson($url, $this->cashReviewBody(['outside_amount' => '10.00', 'allocations' => [['account_id' => $this->accounts['5110'], 'amount' => '40.00', 'refund' => false]]]))->assertOk();
+        $this->report('profit', ['basis' => 'cash'])->assertOk()->assertJsonPath('summary.expense', '40.00')->assertJsonPath('cash_basis_complete', true);
+        $direct = $this->create($this->body());
+        $this->postJson('/accounting/api/cash-basis-reviews/'.$direct['id'], $this->cashReviewBody())->assertUnprocessable();
+    }
+
+    public function test_cash_basis_review_permissions_company_scope_and_closed_periods(): void
+    {
+        $journal = $this->unallocatedCash();
+        $url = '/accounting/api/cash-basis-reviews/'.$journal['id'];
+        $user = User::factory()->create(['is_active' => true]);
+        UserProductAccess::sync($user, ['product_slugs' => ['accounts'], 'company_ids' => [$this->company], 'accounting_role' => 'viewer']);
+        $this->withSession(['judibas_admin' => false])->actingAs($user);
+        $this->getJson($url.'?company_id='.$this->company)->assertOk()->assertJsonPath('can_resolve', false);
+        $this->postJson($url, $this->cashReviewBody())->assertForbidden();
+        UserProductAccess::sync($user, ['product_slugs' => ['accounts'], 'company_ids' => [$this->company], 'accounting_role' => 'accountant']);
+        $this->postJson($url, $this->cashReviewBody())->assertOk();
+        $foreign = DB::table('communication_companies')->insertGetId(['name' => 'Another books company']);
+        $this->getJson($url.'?company_id='.$foreign)->assertForbidden();
+        $this->withSession(['judibas_admin' => true]);
+        $this->getJson($url.'?company_id='.$foreign)->assertNotFound();
+        DB::table('accounting_books')->where('company_id', $this->company)->update(['locked_through' => now()->toDateString()]);
+        $this->getJson($url.'?company_id='.$this->company)->assertOk()->assertJsonPath('can_resolve', false)->assertJsonPath('period_locked', true);
+        $this->postJson($url, $this->cashReviewBody(['version' => 1]))->assertUnprocessable();
+    }
+
+    public function test_cash_basis_review_reversals_offset_allocations_on_their_own_dates(): void
+    {
+        $date = now()->subDays(5)->toDateString();
+        $journal = $this->unallocatedCash($date);
+        $this->postJson('/accounting/api/cash-basis-reviews/'.$journal['id'], $this->cashReviewBody())->assertOk();
+        $reversal = $this->postJson('/accounting/api/journals/'.$journal['id'].'/reverse', ['company_id' => $this->company, 'version' => $journal['version'], 'posting_date' => now()->toDateString(), 'reason' => 'Reverse allocated cash movement'])->assertOk()->json('journal');
+        $this->report('profit', ['basis' => 'cash', 'to' => now()->subDay()->toDateString()])->assertOk()->assertJsonPath('summary.expense', '50.00')->assertJsonPath('cash_basis_complete', true);
+        $this->report('profit', ['basis' => 'cash', 'from' => now()->toDateString()])->assertOk()->assertJsonPath('summary.expense', '-50.00');
+        $this->report('profit', ['basis' => 'cash'])->assertOk()->assertJsonPath('summary.expense', '0.00')->assertJsonPath('cash_basis_complete', true);
+        $this->getJson('/accounting/api/cash-basis-reviews/'.$reversal['id'].'?company_id='.$this->company)->assertOk()->assertJsonPath('journal.id', $journal['id'])->assertJsonPath('review.version', 1);
+    }
+
+    public function test_cash_basis_review_supports_split_expenses_and_rejects_artificial_offsetting_amounts(): void
+    {
+        $journal = $this->unallocatedCash();
+        $url = '/accounting/api/cash-basis-reviews/'.$journal['id'];
+        $this->postJson($url, $this->cashReviewBody(['allocations' => [
+            ['account_id' => $this->accounts['4100'], 'amount' => '10.00', 'refund' => false],
+            ['account_id' => $this->accounts['5110'], 'amount' => '60.00', 'refund' => false],
+        ]]))->assertUnprocessable();
+        $expense = DB::table('accounting_accounts')->insertGetId(['company_id' => $this->company, 'parent_id' => $this->accounts['5100'], 'code' => '05-01-02', 'name' => 'Travel expense', 'root_type' => 'Expense', 'account_type' => 'Operating Expense']);
+        $this->postJson($url, $this->cashReviewBody(['allocations' => [
+            ['account_id' => $this->accounts['5110'], 'amount' => '30.00', 'refund' => false],
+            ['account_id' => $expense, 'amount' => '20.00', 'refund' => false],
+        ]]))->assertOk();
+        $report = $this->report('profit', ['basis' => 'cash'])->assertOk()->assertJsonPath('summary.expense', '50.00')->assertJsonPath('cash_basis_complete', true);
+        $this->assertSame('20.00', collect($report->json('rows'))->keyBy('account_id')[$expense]['amount']);
+    }
+
+    public function test_cash_basis_review_handles_mixed_gross_income_and_bank_fees(): void
+    {
+        $journal = $this->create($this->body('100.00', ['lines' => [
+            ['account_id' => $this->accounts['1120'], 'debit' => '90.00', 'credit' => '0.00'],
+            ['account_id' => $this->accounts['5110'], 'debit' => '10.00', 'credit' => '0.00'],
+            ['account_id' => $this->accounts['4100'], 'debit' => '0.00', 'credit' => '100.00'],
+        ]]));
+        $this->postJson('/accounting/api/cash-basis-reviews/'.$journal['id'], $this->cashReviewBody(['allocations' => [
+            ['account_id' => $this->accounts['4100'], 'amount' => '100.00', 'refund' => false],
+            ['account_id' => $this->accounts['5110'], 'amount' => '10.00', 'refund' => false],
+        ]]))->assertOk();
+        $this->report('profit', ['basis' => 'cash'])->assertOk()->assertJsonPath('summary.income', '100.00')->assertJsonPath('summary.expense', '10.00')->assertJsonPath('summary.profit', '90.00')->assertJsonPath('cash_basis_complete', true);
+    }
+
+    public function test_journal_print_shows_saved_status_and_details_without_posting_a_draft(): void
+    {
+        $journal = $this->create($this->body('125.50', ['remarks' => '<b>Not HTML</b>']), false);
+        $url = '/accounting/journals/'.$journal['id'].'/print?company_id='.$this->company;
+        $before = DB::table('accounting_journal_lines')->where('journal_id', $journal['id'])->get()->toJson();
+        $this->get($url.'&version='.$journal['version'].'&auto_print=1')->assertOk()->assertSee('Journal Entry')->assertSee($journal['number'])->assertSee('DRAFT - saved for review')->assertSee('125.50')->assertSee('Cash')->assertSee('&lt;b&gt;Not HTML&lt;/b&gt;', false)->assertDontSee('<b>Not HTML</b>', false)->assertSee("window.addEventListener('load'", false);
+        $this->assertDatabaseHas('accounting_journals', ['id' => $journal['id'], 'status' => 'draft']);
+        $this->assertSame($before, DB::table('accounting_journal_lines')->where('journal_id', $journal['id'])->get()->toJson());
+        $this->assertDatabaseHas('accounting_audits', ['company_id' => $this->company, 'action' => 'Journal print opened', 'subject' => $journal['number']]);
+        $posted = $this->postJson('/accounting/api/journals/'.$journal['id'].'/post', ['company_id' => $this->company, 'version' => $journal['version']])->assertOk()->json('journal');
+        $this->get($url.'&version='.$journal['version'])->assertStatus(409);
+        $this->get($url.'&version='.$posted['version'])->assertOk()->assertDontSee('DRAFT - saved for review');
+        $this->postJson('/accounting/api/journals/'.$journal['id'].'/reverse', ['company_id' => $this->company, 'version' => $posted['version'], 'posting_date' => now()->toDateString(), 'reason' => 'Incorrect journal'])->assertOk();
+        $this->get($url)->assertOk()->assertSee('REVERSED - this entry has been offset');
+    }
+
+    public function test_journal_print_checks_company_access_and_allows_assigned_read_only_users(): void
+    {
+        $journal = $this->create($this->body(), false);
+        $user = User::factory()->create(['is_active' => true]);
+        UserProductAccess::sync($user, ['product_slugs' => ['accounts'], 'company_ids' => [$this->company], 'accounting_role' => 'viewer']);
+        $this->withSession(['judibas_admin' => false])->actingAs($user);
+        $this->get('/accounting/journals/'.$journal['id'].'/print?company_id='.$this->company)->assertOk();
+        $other = DB::table('communication_companies')->insertGetId(['name' => 'Private other books']);
+        $this->get('/accounting/journals/'.$journal['id'].'/print?company_id='.$other)->assertForbidden();
+        $this->withSession(['judibas_admin' => true]);
+        $this->get('/accounting/journals/'.$journal['id'].'/print?company_id='.$other)->assertNotFound();
     }
 
     private function body(string $amount = '100.00', array $replace = []): array
     {
         return array_replace(['company_id' => $this->company, 'request_key' => (string) Str::uuid(), 'posting_date' => now()->toDateString(), 'kind' => 'general', 'remarks' => 'Cash revenue', 'reference' => 'Test reference', 'lines' => [['account_id' => $this->accounts['1110'], 'debit' => $amount, 'credit' => '0.00'], ['account_id' => $this->accounts['4100'], 'debit' => '0.00', 'credit' => $amount]]], $replace);
+    }
+
+    public function test_single_voucher_supports_multiple_salary_lines_and_all_six_types(): void
+    {
+        // Fund each settlement ledger with a receipt before testing payments.
+        foreach (['cash_receipt'=>'1110','bank_receipt'=>'1120'] as $kind=>$code) {
+            $j=$this->create($this->body('300.03',['kind'=>$kind,'voucher_person'=>'Demo receipts','lines'=>[
+                ['account_id'=>$this->accounts[$code],'debit'=>'300.03','credit'=>'0.00'],
+                ['account_id'=>$this->accounts['4100'],'debit'=>'0.00','credit'=>'100.01','description'=>'Customer A'],
+                ['account_id'=>$this->accounts['4100'],'debit'=>'0.00','credit'=>'200.02','description'=>'Customer B'],
+            ]]));
+            $this->assertSame('300.03',$j['total']);
+        }
+        foreach (['cash_payment'=>'1110','bank_payment'=>'1120','expense'=>'1120'] as $kind=>$code) {
+            $j=$this->create($this->body('60.06',['kind'=>$kind,'voucher_person'=>'November salaries','lines'=>[
+                ['account_id'=>$this->accounts[$code],'debit'=>'0.00','credit'=>'60.06'],
+                ['account_id'=>$this->accounts['5110'],'debit'=>'10.01','credit'=>'0.00','description'=>'Ali salary'],
+                ['account_id'=>$this->accounts['5110'],'debit'=>'20.02','credit'=>'0.00','description'=>'Ahmed salary'],
+                ['account_id'=>$this->accounts['5110'],'debit'=>'30.03','credit'=>'0.00','description'=>'Sara salary'],
+            ]]));
+            $this->get('/accounting/vouchers/'.$j['id'].'/print?company_id='.$this->company)->assertOk()->assertSee('Ali salary')->assertSee('Sara salary');
+            $this->assertCount(4,$j['lines']);
+        }
+        $j=$this->create($this->body('2.00',['kind'=>'income','voucher_person'=>'Service income','lines'=>[
+            ['account_id'=>$this->accounts['1110'],'debit'=>'2.00','credit'=>'0.00'],
+            ['account_id'=>$this->accounts['4100'],'debit'=>'0.00','credit'=>'1.00'],
+            ['account_id'=>$this->accounts['4100'],'debit'=>'0.00','credit'=>'1.00'],
+        ]]));
+        $this->assertStringStartsWith('IV-',$j['number']);
+        $this->getJson('/accounting/api/journals?company_id='.$this->company.'&vouchers=1')->assertOk()->assertJsonPath('total',6);
+        $this->getJson('/accounting/api/journals?company_id='.$this->company)->assertOk()->assertJsonPath('total',0);
+        $this->report('trial')->assertOk()->assertJsonPath('summary.closing_difference','0.00');
+    }
+
+    public function test_single_voucher_rejects_wrong_accounts_direction_and_insufficient_bank_funds(): void
+    {
+        $body=$this->body('100.00',['kind'=>'bank_payment','voucher_person'=>'Salary payment','lines'=>[
+            ['account_id'=>$this->accounts['1120'],'debit'=>'0.00','credit'=>'100.00'],
+            ['account_id'=>$this->accounts['5110'],'debit'=>'100.00','credit'=>'0.00'],
+        ]]);
+        $this->postJson('/accounting/api/journals',$body)->assertUnprocessable()->assertJsonFragment(['message'=>'Insufficient cash/bank balance on '.now()->toDateString().'. Available: PKR 0.00. Payment: PKR 100.00.']);
+        $body['lines'][0]['account_id']=$this->accounts['1110'];
+        $this->postJson('/accounting/api/journals',$body)->assertUnprocessable();
+        $body['kind']='expense';$body['lines'][1]['account_id']=$this->accounts['4100'];
+        $this->postJson('/accounting/api/journals',$body)->assertUnprocessable();
+        $body['kind']='income';
+        $this->postJson('/accounting/api/journals',$body)->assertUnprocessable();
+    }
+
+    public function test_single_voucher_uses_existing_salary_liability_without_recording_expense_twice(): void
+    {
+        $liability=$this->postJson('/accounting/api/accounts',['company_id'=>$this->company,'parent_id'=>$this->accounts['2100'],'code'=>'','name'=>'Salary clearing payable','root_type'=>'Liability','account_type'=>'General','is_group'=>false,'active'=>true])->assertOk()->json('account.id');
+        $this->create($this->body('100.00',['lines'=>[['account_id'=>$this->accounts['1120'],'debit'=>'100.00','credit'=>'0.00'],['account_id'=>$this->accounts['3100'],'debit'=>'0.00','credit'=>'100.00']]]));
+        $this->create($this->body('100.00',['kind'=>'expense','voucher_person'=>'Salary accrual','lines'=>[['account_id'=>$liability,'debit'=>'0.00','credit'=>'100.00'],['account_id'=>$this->accounts['5110'],'debit'=>'100.00','credit'=>'0.00']]]));
+        $this->create($this->body('100.00',['kind'=>'bank_payment','voucher_person'=>'Salary settlement','lines'=>[['account_id'=>$this->accounts['1120'],'debit'=>'0.00','credit'=>'100.00'],['account_id'=>$liability,'debit'=>'40.00','credit'=>'0.00','description'=>'Employee A'],['account_id'=>$liability,'debit'=>'60.00','credit'=>'0.00','description'=>'Employee B']]]));
+        $this->report('profit')->assertOk()->assertJsonPath('summary.expense','100.00');
+        $this->report('ledger',['account_id'=>$liability])->assertOk()->assertJsonPath('closing','0.00');
     }
 
     private function create(array $body, bool $post = true): array
@@ -111,7 +482,7 @@ class AccountingLedgerTest extends TestCase
     public function test_company_currency_and_closed_period_are_protected(): void
     {
         $j = $this->create($this->body(), false);
-        $settings = ['company_id' => $this->company, 'version' => 1, 'currency' => 'PKR', 'start_date' => now()->subYear()->toDateString(), 'locked_through' => now()->toDateString()];
+        $settings = ['company_id' => $this->company, 'version' => 1, 'currency' => 'PKR', 'approval_required' => false, 'start_date' => now()->subYear()->toDateString(), 'locked_through' => now()->toDateString()];
         $this->postJson('/accounting/api/books', array_replace($settings, ['currency' => 'USD']))->assertUnprocessable();
         $this->postJson('/accounting/api/books', $settings)->assertOk();
         $this->postJson('/accounting/api/journals/'.$j['id'].'/post', ['company_id' => $this->company, 'version' => 1])->assertUnprocessable();
@@ -148,7 +519,7 @@ class AccountingLedgerTest extends TestCase
         $this->report('trial')->assertOk();
         $this->postJson('/accounting/api/journals', $this->body())->assertForbidden();
         $this->getJson('/accounting/api/audit?company_id='.$this->company)->assertForbidden();
-        $this->postJson('/accounting/api/books', ['company_id' => $this->company, 'version' => 1, 'currency' => 'PKR', 'start_date' => now()->subYear()->toDateString()])->assertForbidden();
+        $this->postJson('/accounting/api/books', ['company_id' => $this->company, 'version' => 1, 'currency' => 'PKR', 'approval_required' => false, 'start_date' => now()->subYear()->toDateString()])->assertForbidden();
     }
 
     public function test_reports_export_all_rows_and_ledger_paginates(): void

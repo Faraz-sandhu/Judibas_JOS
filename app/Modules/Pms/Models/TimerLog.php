@@ -6,6 +6,15 @@ use Illuminate\Database\Eloquent\Model;
 
 class TimerLog extends Model
 {
+    protected static function booted(): void
+    {
+        static::addGlobalScope('company_context', function ($q) {
+            if (\App\Modules\Pms\Services\PmsCompanyContext::restrict()) {
+                $q->where(fn ($logs) => $logs->whereHas('task')->orWhereHas('subtask.task'));
+            }
+        });
+    }
+
     protected $table='pms_timer_logs';
     protected $fillable = ['task_id', 'subtask_id', 'user_id', 'start_time', 'end_time'];
     protected $casts = [

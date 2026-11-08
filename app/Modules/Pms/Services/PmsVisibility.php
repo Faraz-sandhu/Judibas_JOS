@@ -7,30 +7,36 @@ class PmsVisibility {
  public static function allProjects():bool {return self::unrestricted()||PmsAccess::allows(request(),'project-view-all');}
  public static function companyIds():array {
   if(request()->attributes->has('pms.company_ids'))return request()->attributes->get('pms.company_ids');
-  if(self::allProjects())$ids=\App\Modules\Pms\Models\Company::whereNotNull('platform_company_id')->pluck('id')->all();
-  else {$id=PmsAuth::id();$platform=DB::table('communication_company_memberships')->where('user_id',$id)->pluck('company_id')->all();$primary=request()->user()?->company_id;if($primary)$platform[]=$primary;$ids=\App\Modules\Pms\Models\Company::whereIn('platform_company_id',$platform)->pluck('id')->all();}
+  $query=DB::table('pms_companies')->whereNotNull('platform_company_id');
+  $allowed=PmsCompanyContext::platformIds();
+  if($allowed!==null)$query->whereIn('platform_company_id',$allowed);
+  if($selected=PmsCompanyContext::selected())$query->where('platform_company_id',$selected->id);
+  $ids=$query->pluck('id')->all();
   request()->attributes->set('pms.company_ids',$ids);return $ids;
  }
  public static function teamTasks():bool {return !self::allProjects()&&PmsAccess::allows(request(),'task-view-team');}
  public static function teamDepartmentIds():array {if(!self::teamTasks())return [];return DB::table('pms_user_departments')->where('user_id',PmsAuth::id())->pluck('dept_id')->all();}
  public static function assignedTaskIds(){return DB::table('pms_tasks')->where(function($t){$t->whereIn('id',DB::table('pms_task_user')->where('user_id',PmsAuth::id())->select('task_id'))->orWhereIn('id',DB::table('pms_subtasks')->join('pms_subtask_user','pms_subtask_user.subtask_id','=','pms_subtasks.id')->where('pms_subtask_user.user_id',PmsAuth::id())->select('pms_subtasks.task_id'));if(self::teamTasks())$t->orWhereIn('department_id',self::teamDepartmentIds());})->select('id');}
  public static function projects(Builder $q):void {
+  if(PmsCompanyContext::restrict())$q->whereIn('pms_projects.company_id',self::companyIds());
   if(self::unrestricted())return;
-  $q->whereIn('pms_projects.company_id',self::companyIds());
   if(!self::allProjects())$q->whereHas('tasks');
  }
  public static function tasks(Builder $q):void {
+  if(PmsCompanyContext::restrict())$q->where(function(Builder $t){$t->whereIn('pms_tasks.project_id',DB::table('pms_projects')->whereIn('company_id',self::companyIds())->select('id'));if(!PmsCompanyContext::selected()&&!PmsCompanyContext::catalogueAll())$t->orWhereNull('pms_tasks.project_id');});
   if(self::unrestricted())return;
-  $q->where(fn(Builder $t)=>$t->whereIn('pms_tasks.project_id',DB::table('pms_projects')->whereIn('company_id',self::companyIds())->select('id'))->orWhereNull('pms_tasks.project_id'));
   if(!self::allProjects())$q->whereIn('pms_tasks.id',self::assignedTaskIds());
  }
  public static function subtasks(Builder $q):void {
+  if(PmsCompanyContext::restrict()){
+   $parents=DB::table('pms_tasks')->where(function($t){$t->whereIn('project_id',DB::table('pms_projects')->whereIn('company_id',self::companyIds())->select('id'));if(!PmsCompanyContext::selected()&&!PmsCompanyContext::catalogueAll())$t->orWhereNull('project_id');})->select('id');
+   $q->whereIn('pms_subtasks.task_id',$parents);
+  }
   if(self::unrestricted())return;
-  $parents=DB::table('pms_tasks')->where(fn($t)=>$t->whereIn('project_id',DB::table('pms_projects')->whereIn('company_id',self::companyIds())->select('id'))->orWhereNull('project_id'))->select('id');
-  $q->whereIn('pms_subtasks.task_id',$parents);
   if(!self::allProjects())$q->where(fn($s)=>$s->whereIn('pms_subtasks.task_id',self::assignedTaskIds())->orWhereHas('users',fn($u)=>$u->where('users.id',PmsAuth::id())));
  }
  public static function sprints(Builder $q):void {
+  if(PmsCompanyContext::restrict())$q->whereIn('pms_sprints.project_id',DB::table('pms_projects')->whereIn('company_id',self::companyIds())->select('id'));
   if(self::allProjects())return;
   if(self::teamTasks()){$q->whereHas('project')->where(fn($s)=>$s->whereIn('department_id',self::teamDepartmentIds())->orWhereHas('tasks'));return;}
   $q->whereHas('project')->whereExists(function($tasks){$tasks->selectRaw('1')->from('pms_tasks')->whereColumn('pms_tasks.project_id','pms_sprints.project_id')->whereRaw('(pms_tasks.department_id = pms_sprints.department_id OR (pms_tasks.department_id IS NULL AND pms_sprints.department_id IS NULL))')->where(fn($t)=>$t->whereIn('pms_tasks.id',DB::table('pms_task_user')->where('user_id',PmsAuth::id())->select('task_id'))->orWhereIn('pms_tasks.id',DB::table('pms_subtasks')->join('pms_subtask_user','pms_subtask_user.subtask_id','=','pms_subtasks.id')->where('pms_subtask_user.user_id',PmsAuth::id())->select('pms_subtasks.task_id')));});

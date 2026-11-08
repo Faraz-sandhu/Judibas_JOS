@@ -483,9 +483,9 @@ class ProjectController extends Controller
             //     $imageUrl = asset('project.png');
             // }
 
-            $companyId = $client?->company_id ?? (! empty($validatedData['company_name'])
+            $companyId = $client?->company_id ?? (\App\Modules\Pms\Services\PmsCompanyContext::selected() ? (\App\Modules\Pms\Services\PmsVisibility::companyIds()[0] ?? null) : (! empty($validatedData['company_name'])
                 ? Company::firstOrCreate(['name' => trim($validatedData['company_name'])])->id
-                : null);
+                : null));
             $project = Projects::create([
                 'company_id' => $companyId,
                 'client_id' => $client?->id,
@@ -694,9 +694,9 @@ class ProjectController extends Controller
                 abort_unless(in_array($client->company_id,\App\Modules\Pms\Services\PmsVisibility::companyIds()),403);
                 $project->client_id=$client->id;$project->company_id=$client->company_id;
             } elseif(!$project->client_id){
-            $project->company_id = ! empty($validatedData['company_name'])
+            $project->company_id = \App\Modules\Pms\Services\PmsCompanyContext::selected() ? (\App\Modules\Pms\Services\PmsVisibility::companyIds()[0] ?? null) : (! empty($validatedData['company_name'])
                 ? Company::firstOrCreate(['name' => trim($validatedData['company_name'])])->id
-                : null;
+                : null);
             }
             $project->name = $validatedData['name'];
             $project->description = $validatedData['description'] ?? null;

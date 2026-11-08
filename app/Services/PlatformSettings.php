@@ -25,6 +25,9 @@ class PlatformSettings
             'client_options'=>['connect_timeout'=>1,'timeout'=>2],
         ]]);
         Broadcast::forgetDrivers();
+        // Resetting broadcaster instances also removes their channel callbacks.
+        // Register authorization rules on the newly selected provider again.
+        require base_path('routes/channels.php');
         if (self::tableExists('pms_mail_settings')) {
             $mail = MailSetting::current();
             if ($mail->host && $mail->from_address) { $mail->applyToConfig(); Mail::purge('smtp'); }

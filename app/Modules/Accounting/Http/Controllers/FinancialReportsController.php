@@ -2,7 +2,7 @@
 
 namespace App\Modules\Accounting\Http\Controllers;
 
-use App\Modules\Accounting\Services\{AccountingAccess as Access, Ledger};
+use App\Modules\Accounting\Services\{AccountingAccess as Access, Ledger, CashBasisProfit};
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -23,18 +23,32 @@ class FinancialReportsController
 
     private function buildReport(Request $r)
     {
-        $v = $r->validate(['company_id' => 'required|integer', 'report' => 'required|in:trial,ledger,profit,balance,receivables,payables', 'from' => 'required|date_format:Y-m-d', 'to' => 'required|date_format:Y-m-d|after_or_equal:from', 'account_id' => 'nullable|integer', 'party_id' => 'nullable|integer', 'page' => 'nullable|integer|min:1', 'export' => 'nullable|in:csv']);
+        $v = $r->validate(['company_id' => 'required|integer', 'report' => 'required|in:trial,ledger,profit,balance,receivables,payables', 'from' => 'required|date_format:Y-m-d', 'to' => 'required|date_format:Y-m-d|after_or_equal:from', 'account_id' => 'nullable|integer', 'party_id' => 'nullable|integer', 'page' => 'nullable|integer|min:1', 'export' => 'nullable|in:csv', 'trial_columns' => 'nullable|in:2,6', 'basis' => 'nullable|in:accrual,cash']);
         $company = (int) $v['company_id'];
-        Access::company($r, $company);
+        Access::company($r, $company, 'reports.'.$v['report']);
+        if ($r->input('export') === 'csv') \App\Modules\Accounting\Services\Permissions::require($r, 'reports.export');
         $book = Ledger::book($company);
         if (in_array($v['report'], ['receivables', 'payables'])) {
             return $this->aging($r, $company, $v, $book->currency);
+        }
+        if ($v['report'] === 'profit' && ($v['basis'] ?? 'accrual') === 'cash') {
+            $result = CashBasisProfit::report($company, $v['from'], $v['to'], $book->currency);
+            if ($r->input('export') === 'csv') {
+                $rows = collect($result['rows'])->map(fn ($row) => [$row['code'], $row['name'], $row['root_type'], $row['amount'], 'Cash basis']);
+                $rows->push(['', 'Total income', 'Summary', $result['summary']['income'], 'Cash basis']);
+                $rows->push(['', 'Total expenses', 'Summary', $result['summary']['expense'], 'Cash basis']);
+                $rows->push(['', 'Net profit / loss', 'Summary', $result['summary']['profit'], 'Cash basis']);
+                foreach ($result['cash_basis_review'] as $entry) $rows->push(['', $entry['number'].' on '.$entry['posting_date'].': '.$entry['reason'], 'Excluded - needs review', '', 'Cash basis']);
+                foreach ($result['cash_basis_resolved'] as $entry) $rows->push(['', $entry['number'].' on '.$entry['posting_date'].' reviewed by '.$entry['reviewed_by'].': '.$entry['note'], $entry['decision'] === 'outside' ? 'Reviewed - outside Profit and Loss' : 'Reviewed - allocated', '', 'Cash basis']);
+                return $this->csv($r, $company, 'profit-cash', ['Account code', 'Account / note', 'Type', 'Amount', 'Accounting basis'], $rows);
+            }
+            return $result;
         }
         $q = DB::table('accounting_journal_lines as l')->join('accounting_journals as j', 'j.id', '=', 'l.journal_id')->join('accounting_accounts as a', 'a.id', '=', 'l.account_id')->where('j.company_id', $company)->whereIn('j.status', ['posted', 'reversed']);
         if (! empty($v['account_id'])) {
             abort_unless(DB::table('accounting_accounts')->where('company_id', $company)->where('id', $v['account_id'])->where('is_group', false)->exists(), 422, 'Select a ledger account in this company.');
         }
-        $result = ['currency' => $book->currency, 'report' => $v['report'], 'from' => $v['from'], 'to' => $v['to']];
+        $result = ['basis' => 'accrual', 'currency' => $book->currency, 'report' => $v['report'], 'from' => $v['from'], 'to' => $v['to']];
         if ($v['report'] === 'ledger') {
             if (! empty($v['party_id'])) {
                 abort_unless(DB::table('accounting_parties')->where('company_id', $company)->where('id', $v['party_id'])->exists(), 422, 'Select a contact in this company.');
@@ -47,11 +61,11 @@ class FinancialReportsController
             $period = (clone $q)->whereBetween('j.posting_date', [$v['from'], $v['to']]);
             $total = (clone $period)->selectRaw('COALESCE(SUM(l.debit_minor),0) as debit, COALESCE(SUM(l.credit_minor),0) as credit')->first();
             $query = $period->select(['l.id', 'j.posting_date', 'j.number', 'j.status', 'j.remarks', 'a.code', 'a.name', 'l.debit_minor', 'l.credit_minor'])->selectRaw('? + SUM(l.debit_minor-l.credit_minor) OVER (ORDER BY j.posting_date,j.id,l.position ROWS UNBOUNDED PRECEDING) as balance_minor', [$opening])->orderBy('j.posting_date')->orderBy('j.id')->orderBy('l.position');
-            $result += ['opening' => Ledger::money($opening), 'debit' => Ledger::money((int) $total->debit), 'credit' => Ledger::money((int) $total->credit), 'closing' => Ledger::money($opening + (int) $total->debit - (int) $total->credit)];
+            $result += ['opening' => Ledger::money($opening), 'opening_debit' => Ledger::money(max(0, $opening)), 'opening_credit' => Ledger::money(max(0, -$opening)), 'debit' => Ledger::money((int) $total->debit), 'credit' => Ledger::money((int) $total->credit), 'closing' => Ledger::money($opening + (int) $total->debit - (int) $total->credit)];
             if ($r->input('export') === 'csv') {
                 return $this->csv($r, $company, $v['report'], ['Date', 'Journal', 'Account code', 'Account', 'Description', 'Debit', 'Credit', 'Running debit balance'], $query->get()->map(fn ($l) => [$l->posting_date, $l->number, $l->code, $l->name, $l->remarks, Ledger::money($l->debit_minor), Ledger::money($l->credit_minor), Ledger::money($l->balance_minor)]));
             }
-            $rows = $query->paginate(30);
+            $rows = $query->paginate(30, ['*'], 'page', (int)($v['page']??1));
             $rows->setCollection($rows->getCollection()->map(fn ($l) => array_merge((array) $l, ['debit' => Ledger::money($l->debit_minor), 'credit' => Ledger::money($l->credit_minor), 'balance' => Ledger::money($l->balance_minor)])));
 
             return $result + ['entries' => $rows];
@@ -90,9 +104,17 @@ class FinancialReportsController
                 continue;
             }
             $amount = $v['report'] === 'profit' ? ($a->root_type === 'Income' ? $credit - $debit : $debit - $credit) : (in_array($a->root_type, ['Liability', 'Equity']) ? -$balance : $balance);
-            $rows[] = ['account_id' => $a->id, 'code' => $a->code, 'name' => $a->name, 'root_type' => $a->root_type, 'opening' => Ledger::money($opening), 'debit' => Ledger::money($debit), 'credit' => Ledger::money($credit), 'closing_debit' => Ledger::money(max(0, $balance)), 'closing_credit' => Ledger::money(max(0, -$balance)), 'amount' => Ledger::money($amount)];
+            $rows[] = ['account_id' => $a->id, 'code' => $a->code, 'name' => $a->name, 'root_type' => $a->root_type, 'opening' => Ledger::money($opening), 'opening_debit' => Ledger::money(max(0, $opening)), 'opening_credit' => Ledger::money(max(0, -$opening)), 'debit' => Ledger::money($debit), 'credit' => Ledger::money($credit), 'closing_debit' => Ledger::money(max(0, $balance)), 'closing_credit' => Ledger::money(max(0, -$balance)), 'amount' => Ledger::money($amount)];
         }
         $result += ['rows' => $rows, 'summary' => ['opening_difference' => Ledger::money($sumOpening), 'debit' => Ledger::money($sumDebit), 'credit' => Ledger::money($sumCredit), 'closing_difference' => Ledger::money($sumClosing), 'income' => Ledger::money($income), 'expense' => Ledger::money($expense), 'profit' => Ledger::money($income - $expense), 'assets' => Ledger::money($assets), 'liabilities' => Ledger::money($liabilities), 'equity' => Ledger::money($equity), 'accumulated_earnings' => Ledger::money($earnings), 'balance_difference' => Ledger::money($assets - $liabilities - $equity - $earnings)]];
+        if ($r->input('export') === 'csv' && $v['report'] === 'profit') {
+            return $this->csv($r, $company, 'profit-accrual', ['Account code', 'Account', 'Type', 'Amount', 'Accounting basis'], collect($rows)->map(fn ($row) => [$row['code'], $row['name'], $row['root_type'], $row['amount'], 'Accrual basis']));
+        }
+        if ($r->input('export') === 'csv' && $v['report'] === 'trial') {
+            $keys = ($v['trial_columns'] ?? '6') === '2' ? ['closing_debit', 'closing_credit'] : ['opening_debit', 'opening_credit', 'debit', 'credit', 'closing_debit', 'closing_credit'];
+            $labels = ($v['trial_columns'] ?? '6') === '2' ? ['Closing debit', 'Closing credit'] : ['Opening debit', 'Opening credit', 'Period debit', 'Period credit', 'Closing debit', 'Closing credit'];
+            return $this->csv($r, $company, 'trial', array_merge(['Account code', 'Account', 'Type'], $labels), collect($rows)->map(fn ($row) => array_merge([$row['code'], $row['name'], $row['root_type']], array_map(fn ($key) => $row[$key], $keys))));
+        }
         if ($r->input('export') === 'csv') {
             return $this->csv($r, $company, $v['report'], $v['report'] === 'trial' ? ['Account code', 'Account', 'Type', 'Opening (debit positive)', 'Period debit', 'Period credit', 'Closing debit', 'Closing credit'] : ['Account code', 'Account', 'Type', 'Amount'], collect($rows)->map(fn ($l) => $v['report'] === 'trial' ? [$l['code'], $l['name'], $l['root_type'], $l['opening'], $l['debit'], $l['credit'], $l['closing_debit'], $l['closing_credit']] : [$l['code'], $l['name'], $l['root_type'], $l['amount']])->when($v['report'] === 'balance', fn ($rows) => $rows->push(['', 'Accumulated earnings', 'Equity', Ledger::money($earnings)])));
         }

@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import {workspaceCompany,replaceCompanyWorkspace} from '../../companyWorkspace';
 import {connectDaymark} from './realtime';
 import {ref,computed,onMounted,watch,onBeforeUnmount} from 'vue';
 import AdminDialog from '../../AdminDialog.vue';import Pagination from '../../CvBankPagination.vue';import Editor from './DaymarkEditor.vue';import './daymark.css';
 const props=defineProps<{csrf?:string}>();
-const today=new Date().toLocaleDateString('en-CA'),month=ref(today.slice(0,7)),date=ref(today),company=ref(''),employee=ref(''),department=ref(''),status=ref(''),search=ref(''),page=ref(1),size=ref(12),monthlyTab=ref('people');
+const today=new Date().toLocaleDateString('en-CA'),month=ref(today.slice(0,7)),date=ref(today),company=ref(workspaceCompany('daymark')==='all'?'':workspaceCompany('daymark')),employee=ref(''),department=ref(''),status=ref(''),search=ref(''),page=ref(1),size=ref(12),monthlyTab=ref('people');
 const reportFilter=ref('');
+watch(company,value=>replaceCompanyWorkspace('daymark',value||'all'));
 const mobileNav=ref(false),inlineDepartmentName=ref(''),addingDepartment=ref(false),reportReady=ref(false);
 let restoringFilters=false,reportNavigation=false;
 const savingReport=ref(''),downloading=ref('');
@@ -42,7 +44,7 @@ watch(section,(next,previous)=>{
  restoringFilters=true;
  savedFilters[previous]={company:company.value,employee:employee.value,department:department.value,status:status.value,search:search.value,date:date.value,month:month.value,reportFilter:reportFilter.value};
  const state=savedFilters[next]||{};reportFilter.value=state.reportFilter||'';
- company.value=state.company||'';employee.value=state.employee||'';department.value=state.department||'';status.value=state.status||'';search.value=state.search||'';date.value=state.date||today;month.value=state.month||today.slice(0,7);restoringFilters=false;page.value=1;if(!reportNavigation)void load();
+ company.value=state.company||((workspaceCompany('daymark')==='all'?'':workspaceCompany('daymark')));employee.value=state.employee||'';department.value=state.department||'';status.value=state.status||'';search.value=state.search||'';date.value=state.date||today;month.value=state.month||today.slice(0,7);restoringFilters=false;page.value=1;if(!reportNavigation)void load();
 },{flush:'sync'});
 watch([date,month],()=>{if(!restoringFilters&&!reportNavigation){page.value=1;void load();}},{flush:'sync'});watch([company,employee,department,status,search,monthlyTab,reportFilter],()=>page.value=1);
 function open(kind:string,value:any={}){reportBaseline='';inlineDepartmentName.value='';addingDepartment.value=false;reportReady.value=false;modalError.value='';dialog.value=kind;form.value={...value,...(kind==='daily-export'?{export_company:company.value,export_department:department.value}:{})};}

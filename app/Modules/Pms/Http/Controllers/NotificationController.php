@@ -21,6 +21,8 @@ class NotificationController extends Controller
         $item = \App\Modules\Pms\Services\PmsAuth::user()->notifications()->whereKey($notification)->firstOrFail();
         $item->markAsRead();
 
-        return redirect()->to($item->data['url'] ?? '/pms?section=my-work');
+        $url=$item->data['url'] ?? '/pms?section=my-work';
+        if (request()->filled('workspace_company') && str_starts_with($url,'/pms')) $url.=(str_contains($url,'?')?'&':'?').'workspace_company='.urlencode(request()->query('workspace_company'));
+        return redirect()->to($url);
     }
 }

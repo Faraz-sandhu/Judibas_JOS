@@ -39,3 +39,14 @@ This is account-structure management only. The ledger, balances, opening transac
 Updates and deletion require the account version returned by the data API. A stale version receives HTTP 409 and cannot overwrite or delete a newer account. The UI refreshes the underlying chart on conflict, allowing the user to reopen the latest account.
 
 A follow-up migration adds a composite same-company parent foreign key, one protected root per company/type, and PostgreSQL checks for valid root types, normalized codes, root/child structure, group account type and direct self-parenting. Cycle and active-parent validation remains in the serialized server transaction. These checks strengthen structure integrity; they do not certify a future ledger, financial statements or local statutory accounting.
+
+
+## Automatic codes and chart amounts (2 November 2026)
+
+New starter charts use 01 Assets, 02 Liabilities, 03 Equity (including capital), 04 Income and 05 Expenses. New accounts receive a child code automatically on save, for example 01-01-04. Allocation runs under the existing company transaction lock and skips codes already in use. The browser preview is provisional. Existing charts and manually assigned codes are preserved; their new children use the existing parent code as their prefix. No existing accounts or journal references are renumbered.
+
+The chart displays cumulative debit, credit and net balance as of today, in the company book currency. Group figures roll up descendant ledgers without double-counting. Drafts are excluded; reversed originals and their posted offset entries are included. Zero balances remain visible. Dr/Cr identifies the actual balance side, including abnormal balances. These are ledger balances, not editable opening balances; use balanced opening journals to enter starting amounts. Current earnings remain in income/expense ledgers until an explicit closing entry is posted.
+
+Double-entry already applies to journals and invoice/payment posting. Journal lines must use exactly one positive side and total debits must equal total credits. Existing period locks, immutable posted lines and reversal rules remain in place.
+
+Hierarchical account codes use hyphens (for example 01-01-01). The November 2026 migration converts numeric dotted codes while preserving account IDs, journal links and balances; conflicting codes stop the migration rather than overwriting accounts.

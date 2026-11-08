@@ -14,3 +14,80 @@
 .super-admin .admin-navigation-group{margin-bottom:16px}
 .super-admin .admin-navigation-group>summary{cursor:pointer;padding:10px 12px;color:var(--muted,#8b8d98);font-size:12px;font-weight:600;letter-spacing:.6px;text-transform:uppercase}
 .super-admin .admin-navigation-group>summary::marker{color:currentColor}
+/* Administration console: shared Judibas components, scoped away from product workspaces. */
+.admin-console{max-width:1560px;margin:34px auto 60px;padding:0 32px}
+.admin-console .admin-heading{padding-bottom:25px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.admin-console .admin-shell{grid-template-columns:220px minmax(0,1fr);gap:30px}
+.admin-console .admin-navigation{padding:12px;background:var(--rail);border-radius:14px}
+.admin-console .admin-navigation-group{margin-bottom:12px}
+.admin-console .admin-navigation-group:last-child{margin-bottom:0}
+.admin-console .admin-navigation-group>summary{font-size:10px;padding:12px 10px;letter-spacing:1px}
+.admin-console .admin-navigation button{min-height:40px;padding:10px 12px;margin:3px 0;border-radius:8px}
+.admin-console .admin-main{padding-top:3px}
+.admin-console .admin-main>section,.admin-console .admin-main>div{min-width:0}
+.admin-console .admin-main h2{font-size:23px;font-weight:650;letter-spacing:-.6px;margin:0 0 8px}
+.admin-console .admin-main h3{font-size:16px;font-weight:600;letter-spacing:-.2px}
+.admin-console .admin-section-heading{margin:0 0 24px;min-height:62px}
+.admin-console .admin-section-heading p{max-width:760px}
+.admin-kicker{color:var(--admin-accent);font-size:10px;letter-spacing:1.2px;font-weight:650;margin:0 0 10px}
+.admin-console .admin-main .muted{line-height:1.65}
+.admin-console .admin-editor,.admin-console .settings-form{max-width:none;width:100%;box-sizing:border-box}
+.admin-console .admin-editor label,.admin-company-form label{font-weight:500}
+.admin-console .admin-list{margin:20px 0;background:var(--bg)}
+.admin-console .admin-list article{gap:16px;min-width:0;padding:18px 22px}
+.admin-console .admin-list article>div:first-child{min-width:0}
+.admin-console .admin-list strong,.admin-console .admin-chip{overflow-wrap:anywhere}
+.admin-console .row-actions,.admin-console .editor-actions{flex-wrap:wrap}
+.admin-console .row-actions{flex-shrink:0;align-items:center}
+.admin-console .admin-list button{border:1px solid var(--line);border-radius:7px;padding:8px 12px;text-decoration:none;background:var(--bg);white-space:nowrap}
+.admin-console .admin-list button:hover{background:var(--hover)}
+.admin-console .admin-stats{margin:24px 0;grid-template-columns:repeat(4,minmax(0,1fr))}
+.admin-console .admin-stats>*{padding:22px;text-align:left;transition:border-color .15s}
+.admin-console .admin-stats>*:hover{border-color:var(--admin-accent)}
+.admin-console .admin-stats strong{font-size:32px;line-height:1.2;margin-bottom:12px}
+.admin-console .admin-stats span{line-height:1.5}
+.admin-shortcuts{margin-top:30px;border:1px solid var(--line);border-radius:14px;padding:22px;display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.admin-shortcuts>div{flex:1 1 100%;min-width:0}
+.admin-console .admin-shortcuts h3{margin:0 0 6px}
+.admin-shortcuts p{font-size:13px}
+.admin-directory-summary{border:1px solid var(--line);border-radius:12px;padding:20px 22px;display:flex;gap:30px;align-items:center;background:var(--rail);margin-bottom:22px}
+.admin-directory-summary>div{display:flex;gap:14px;align-items:center;min-width:0}
+.admin-directory-summary>div:nth-child(2){flex-direction:column;align-items:flex-start;gap:5px;padding-left:28px;border-left:1px solid var(--line)}
+.admin-directory-summary strong{display:block;font-size:24px;line-height:1.2;font-weight:650}
+.admin-directory-summary span:not(.admin-summary-icon){display:block;font-size:12px;color:var(--muted);margin-top:5px}
+.admin-directory-summary>p{margin-left:auto;max-width:280px;font-size:12px;color:var(--muted);line-height:1.7}
+.admin-summary-icon{display:grid;place-items:center;background:color-mix(in srgb,var(--admin-accent) 12%,var(--bg));color:var(--admin-accent);width:44px;height:44px;border-radius:11px;flex-shrink:0}
+.admin-summary-icon svg{width:24px;height:24px}
+.admin-company-table{width:100%;border-collapse:collapse;min-width:580px;text-align:left}
+.admin-company-table th{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);background:var(--rail);padding:14px 22px;white-space:nowrap}
+.admin-company-table td{font-size:13px;padding:15px 22px;border-top:1px solid var(--line);vertical-align:middle}
+.admin-company-table td:last-child{text-align:right}
+.admin-company-table tbody tr:hover{background:var(--hover)}
+.admin-company-table .admin-person{min-width:200px}
+.admin-company-table .admin-person strong{overflow-wrap:anywhere}
+.admin-console .admin-filterbar{padding:16px 20px;background:var(--bg)}
+.admin-console .admin-filterbar .admin-search-field{max-width:520px}
+.admin-console .admin-filterbar label:not(.admin-search-field){min-width:120px}
+.admin-console .empty-state{padding:40px 20px;text-align:center}
+.admin-console .empty-state p{margin:8px 0 15px;color:var(--muted)}
+.admin-company-dialog{width:min(480px,calc(100vw - 32px))}
+.admin-company-form{display:grid;gap:20px}
+.admin-company-form label{display:grid;gap:8px;font-size:13px}
+.admin-company-form>.muted{font-size:12px;line-height:1.7;color:var(--muted)}
+.admin-company-form .editor-actions{display:flex;justify-content:flex-end;padding-top:18px;border-top:1px solid var(--line);margin:0;gap:10px}
+.admin-sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.admin-saving-spinner{width:13px;height:13px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:admin-saving .7s linear infinite}
+@keyframes admin-saving{to{transform:rotate(360deg)}}
+@media(max-width:1100px){.admin-console{padding:0 22px}.admin-console .admin-shell{grid-template-columns:190px minmax(0,1fr);gap:22px}.admin-console .admin-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.admin-directory-summary>p{display:none}.admin-console .admin-filterbar .admin-search-field{max-width:none}}
+@media(max-width:760px){.admin-console{padding:0 16px;margin-top:24px}.admin-console .admin-shell{display:block}.admin-console .admin-heading{padding-bottom:20px;gap:16px}.admin-console .admin-heading-actions{flex-wrap:wrap}.admin-console .admin-navigation{position:static;margin-bottom:24px}.admin-console .admin-navigation nav{display:block;overflow:visible}.admin-console .admin-navigation-group{margin-bottom:4px}.admin-console .admin-navigation-group>summary{padding:9px 10px}.admin-console .admin-navigation button{display:inline-flex;width:auto;margin:3px;white-space:normal;text-align:left;min-height:36px}.admin-console .admin-main h2{font-size:21px}.admin-console .admin-section-heading{min-height:0;gap:14px;align-items:flex-start}.admin-console .admin-section-heading>div:first-child{min-width:0;flex-basis:100%}.admin-directory-summary{gap:18px;padding:16px;flex-wrap:wrap}.admin-directory-summary>div:nth-child(2){padding-left:18px}.admin-directory-summary strong{font-size:21px}.admin-console .admin-pagination>div{gap:8px}.admin-console .admin-filterbar{padding:14px}.admin-console .admin-list article{padding:16px}.admin-console .admin-stats>*{padding:18px}.admin-console .admin-stats strong{font-size:27px}}
+@media(max-width:380px){.admin-directory-summary>div:nth-child(2){border-left:0;padding-left:0;flex-basis:100%}.admin-console .admin-stats{gap:10px}.admin-console .admin-pagination>div{flex-wrap:wrap}.admin-console .admin-pagination{font-size:10px}}
+@media(prefers-reduced-motion:reduce){.admin-saving-spinner{animation:none}}
+.admin-content-search{display:flex;align-items:flex-end;gap:20px;padding:16px 20px;background:var(--rail);border:1px solid var(--line);border-radius:12px;margin:22px 0 0}
+.admin-content-search>label{display:grid;gap:7px;flex:1;max-width:520px;font-size:11px;color:var(--muted)}
+.admin-content-search>span{margin-left:auto;padding-bottom:12px;font-size:12px;color:var(--muted);white-space:nowrap}
+.admin-console .admin-content-search+.admin-list{margin-top:14px}
+@media(max-width:550px){.admin-content-search{padding:14px;gap:12px;flex-wrap:wrap}.admin-content-search>label{flex-basis:100%;max-width:none}.admin-content-search>span{padding:0}}
+.admin-console .admin-table-card{position:relative}
+.admin-company-table th:last-child{text-align:right}
+.admin-console .platform-settings{width:100%;max-width:none}
+.admin-console .platform-settings>form{box-shadow:none}

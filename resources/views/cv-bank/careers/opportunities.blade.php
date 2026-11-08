@@ -3,17 +3,17 @@
     <div class="opportunities-{{ $presentation }}">
     @forelse($jobs as $job)
         @if($presentation === 'accordion')
-        <details class="role-accordion" data-job-card data-search="{{ strtolower($job->title.' '.$job->department) }}" data-department="{{ $job->department }}">
+        <details class="role-accordion" data-job-card data-search="{{ strtolower($job->title.' '.$job->department.' '.implode(' ', $job->locations)) }}" data-department="{{ $job->department }}">
             <summary><span class="role-number">{{ str_pad($loop->iteration,2,'0',STR_PAD_LEFT) }}</span><span><small>{{ $job->department }}</small><strong>{{ $job->title }}</strong></span><span class="accordion-plus" aria-hidden="true">+</span></summary>
-            <div class="accordion-content"><p>{{ $job->description ?: 'Bring your skills and a fresh perspective to our team.' }}</p><button type="button" class="btn" data-job="{{ $job->id }}" data-department="{{ $job->department }}">Apply for this role <span>&rarr;</span></button></div>
+            <div class="accordion-content"><p>{{ \Illuminate\Support\Str::limit($job->description ?: 'Bring your skills and a fresh perspective to our team.',180) }}</p><p class="role-meta">{{ implode(' / ', $job->locations) ?: \Illuminate\Support\Str::headline($job->work_mode) }} &middot; {{ \Illuminate\Support\Str::headline($job->employment_type) }}</p><a class="btn" href="{{ $job->detail_url }}">View details <span>&rarr;</span></a></div>
         </details>
         @elseif(in_array($presentation, ['editorial','compact','directory']))
-        <article class="role-row" data-job-card data-search="{{ strtolower($job->title.' '.$job->department) }}" data-department="{{ $job->department }}">
-            <span class="role-number">{{ str_pad($loop->iteration,2,'0',STR_PAD_LEFT) }}</span><div class="role-row-copy"><span class="job-tag">{{ $job->department }}</span><h3>{{ $job->title }}</h3><p>{{ $job->description ?: 'Bring your skills and a fresh perspective to our team.' }}</p></div><button type="button" class="row-apply" data-job="{{ $job->id }}" data-department="{{ $job->department }}"><span>Apply</span> &nearr;</button>
+        <article class="role-row" data-job-card data-search="{{ strtolower($job->title.' '.$job->department.' '.implode(' ', $job->locations)) }}" data-department="{{ $job->department }}">
+            <span class="role-number">{{ str_pad($loop->iteration,2,'0',STR_PAD_LEFT) }}</span><div class="role-row-copy"><span class="job-tag">{{ $job->department }}</span><h3>{{ $job->title }}</h3><small class="role-meta">{{ implode(' / ', $job->locations) ?: \Illuminate\Support\Str::headline($job->work_mode) }}</small><p>{{ \Illuminate\Support\Str::limit($job->description ?: 'Bring your skills and a fresh perspective to our team.',180) }}</p></div><a class="row-apply" href="{{ $job->detail_url }}"><span>View details</span> &nearr;</a>
         </article>
         @else
-        <article class="job-card" data-job-card data-search="{{ strtolower($job->title.' '.$job->department) }}" data-department="{{ $job->department }}">
-            <div class="job-top"><span class="job-tag">{{ $job->department }}</span><span class="job-arrow" aria-hidden="true">&nearr;</span></div><h3>{{ $job->title }}</h3><p>{{ $job->description ?: 'Bring your skills and a fresh perspective to our team.' }}</p><button type="button" class="job-apply" data-job="{{ $job->id }}" data-department="{{ $job->department }}">Apply for this role <span>&rarr;</span></button>
+        <article class="job-card" data-job-card data-search="{{ strtolower($job->title.' '.$job->department.' '.implode(' ', $job->locations)) }}" data-department="{{ $job->department }}">
+            <div class="job-top"><span class="job-tag">{{ $job->department }}</span><span class="job-arrow" aria-hidden="true">&nearr;</span></div><h3>{{ $job->title }}</h3><small class="role-meta">{{ implode(' / ', $job->locations) ?: \Illuminate\Support\Str::headline($job->work_mode) }}</small><p>{{ \Illuminate\Support\Str::limit($job->description ?: 'Bring your skills and a fresh perspective to our team.',180) }}</p><p class="role-meta">{{ implode(' / ', $job->locations) ?: \Illuminate\Support\Str::headline($job->work_mode) }} &middot; {{ \Illuminate\Support\Str::headline($job->employment_type) }}</p><a class="job-apply" href="{{ $job->detail_url }}">View details <span>&rarr;</span></a>
         </article>
         @endif
     @empty

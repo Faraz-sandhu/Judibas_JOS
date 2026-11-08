@@ -3,6 +3,7 @@
 namespace App\Modules\Accounting\Http\Controllers;
 
 use App\Modules\Accounting\Services\AccountingAccess as Access;
+use App\Modules\Accounting\Services\ChartSummary;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -15,13 +16,21 @@ class ChartOfAccountsController
     {
         $role = Access::role($r);
         $companies = Access::companies($r);
+        if($r->boolean('choose'))return ['can_view_all'=>\App\Services\PlatformAccess::administrator($r),'is_super_admin'=>\App\Services\PlatformAccess::super($r),'companies'=>$companies,'company_id'=>null,'accounts'=>[],'book'=>null,'permissions'=>\App\Modules\Accounting\Services\Permissions::effective($r),'role'=>$role,'account_types'=>self::TYPES];
+        if($r->input('company_id')==='all'){
+            AllCompaniesController::authorize($r);
+            return ['all_companies'=>true,'can_view_all'=>true,'companies'=>$companies,'company_id'=>null,'accounts'=>[],'book'=>null,'permissions'=>\App\Modules\Accounting\Services\Permissions::effective($r),'role'=>$role,'role_name'=>'Administrator','can_manage'=>false,'can_delete'=>false,'account_types'=>self::TYPES];
+        }
         $r->validate(['company_id' => 'nullable|integer|min:1']);
         $company = (int) ($r->input('company_id') ?: ($companies->first()->id ?? 0));
         if ($company) {
             Access::company($r, $company);
         }
 
-        return ['companies' => $companies, 'company_id' => $company ?: null, 'role' => $role, 'book' => $company ? DB::table('accounting_books')->where('company_id', $company)->first() : null, 'can_manage' => in_array($role, ['manager', 'accountant']), 'can_delete' => $role === 'manager', 'account_types' => self::TYPES, 'accounts' => $company ? DB::table('accounting_accounts')->where('company_id', $company)->orderBy('code')->get() : []];
+        $book=$company?DB::table('accounting_books')->where('company_id',$company)->first():null;
+        if($book)$book=\App\Modules\Accounting\Services\GlobalPolicy::apply($book);
+        if($book)$book->approval_types=\App\Modules\Accounting\Services\ApprovalPolicy::selected($book);
+        return ['can_view_all'=>\App\Services\PlatformAccess::administrator($r), 'global_policy'=>\App\Modules\Accounting\Services\GlobalPolicy::get(), 'is_super_admin'=>\App\Services\PlatformAccess::super($r), 'companies' => $companies, 'company_id' => $company ?: null, 'role' => $role, 'book' => $book, 'permissions' => \App\Modules\Accounting\Services\Permissions::effective($r), 'role_name' => DB::table('accounting_roles')->where('slug', $role)->value('name') ?? 'Accounting Manager', 'can_manage' => count(array_filter(\App\Modules\Accounting\Services\Permissions::effective($r), fn ($p) => preg_match('/\.(create|update|post)$/', $p))) > 0, 'can_delete' => \App\Modules\Accounting\Services\Permissions::can($r, 'chart.delete'), 'account_types' => self::TYPES, 'accounts' => $company ? (\App\Modules\Accounting\Services\Permissions::can($r, 'chart.view') ? ChartSummary::accounts($company) : DB::table('accounting_accounts')->where('company_id', $company)->orderBy('code')->get(['id','company_id','parent_id','code','name','root_type','account_type','is_group','is_system','active','version','description'])) : []];
     }
 
     private function lock(int $company): void
@@ -33,11 +42,11 @@ class ChartOfAccountsController
     {
         $v = $r->validate(['company_id' => 'required|integer|min:1']);
         $company = (int) $v['company_id'];
-        Access::company($r, $company, 'manage');
+        Access::company($r, $company, 'chart.initialize');
         DB::transaction(function () use ($r, $company) {
             $this->lock($company);
             abort_if(DB::table('accounting_accounts')->where('company_id', $company)->exists(), 422, 'This company already has a chart of accounts.');
-            foreach (['Asset' => ['1000', 'Assets', [['1100', 'Current Assets', [['1110', 'Cash', 'Cash'], ['1120', 'Bank', 'Bank'], ['1130', 'Accounts Receivable', 'Receivable']]]]], 'Liability' => ['2000', 'Liabilities', [['2100', 'Current Liabilities', [['2110', 'Accounts Payable', 'Payable']]]]], 'Equity' => ['3000', 'Equity', [['3100', 'Owner Capital', 'Capital']]], 'Income' => ['4000', 'Income', [['4100', 'Service Revenue', 'Sales']]], 'Expense' => ['5000', 'Expenses', [['5100', 'Operating Expenses', [['5110', 'Office Expenses', 'Operating Expense']]]]]] as $root => $spec) {
+            foreach (['Asset' => ['01', 'Assets', [['01-01', 'Current Assets', [['01-01-01', 'Cash', 'Cash'], ['01-01-02', 'Bank', 'Bank'], ['01-01-03', 'Accounts Receivable', 'Receivable']]]]], 'Liability' => ['02', 'Liabilities', [['02-01', 'Current Liabilities', [['02-01-01', 'Accounts Payable', 'Payable']]]]], 'Equity' => ['03', 'Equity', [['03-01', 'Owner Capital', 'Capital']]], 'Income' => ['04', 'Income', [['04-01', 'Service Revenue', 'Sales']]], 'Expense' => ['05', 'Expenses', [['05-01', 'Operating Expenses', [['05-01-01', 'Office Expenses', 'Operating Expense']]]]]] as $root => $spec) {
                 $id = $this->insert($company, null, $spec[0], $spec[1], $root, 'General', true, true);
                 foreach ($spec[2] as $child) {
                     $group = is_array($child[2]);
@@ -62,10 +71,10 @@ class ChartOfAccountsController
 
     public function save(Request $r)
     {
-        $v = $r->validate(['version' => [Rule::requiredIf(fn () => $r->filled('id')), 'integer', 'min:1'], 'id' => 'nullable|integer|min:1', 'company_id' => 'required|integer|min:1', 'parent_id' => 'required|integer|min:1', 'code' => ['required', 'string', 'max:20', 'regex:/^[A-Za-z0-9][A-Za-z0-9.\-]*$/'], 'name' => 'required|string|max:150', 'root_type' => ['required', Rule::in(array_keys(self::TYPES))], 'account_type' => 'required|string', 'is_group' => 'required|boolean', 'active' => 'required|boolean', 'description' => 'nullable|string|max:2000']);
+        $v = $r->validate(['version' => [Rule::requiredIf(fn () => $r->filled('id')), 'integer', 'min:1'], 'id' => 'nullable|integer|min:1', 'company_id' => 'required|integer|min:1', 'parent_id' => 'required|integer|min:1', 'code' => ['nullable', 'string', 'max:255', 'regex:/^[A-Za-z0-9][A-Za-z0-9.\-]*$/'], 'name' => 'required|string|max:150', 'root_type' => ['required', Rule::in(array_keys(self::TYPES))], 'account_type' => 'required|string', 'is_group' => 'required|boolean', 'active' => 'required|boolean', 'description' => 'nullable|string|max:2000']);
         $company = (int) $v['company_id'];
-        Access::company($r, $company, 'manage');
-        $v['code'] = strtoupper(trim($v['code']));
+        Access::company($r, $company, $r->filled('id') ? 'chart.update' : 'chart.create');
+        $v['code'] = strtoupper(trim($v['code'] ?? ''));
         $v['name'] = trim($v['name']);
         abort_if($v['name'] === '', 422, 'Enter an account name.');
         $account = DB::transaction(function () use ($r, $v, $company) {
@@ -89,6 +98,9 @@ class ChartOfAccountsController
                     $visited[$cursor->id] = true;
                     $cursor = $cursor->parent_id ? (clone $q)->where('id', $cursor->parent_id)->first() : null;
                 }abort_if(! $v['active'] && (clone $q)->where('parent_id', $old->id)->where('active', true)->exists(), 422, 'Deactivate the active child accounts first.');
+            }
+            if ($v['code'] === '') {
+                $v['code'] = $old ? $old->code : ChartSummary::nextCode($company, $parent);
             }
             abort_if((clone $q)->where('code', $v['code'])->when($old, fn ($query) => $query->where('id', '!=', $old->id))->exists(), 422, 'This account code is already used in this company.');
             abort_unless(in_array($v['account_type'], self::TYPES[$v['root_type']], true), 422, 'Choose an account type for this root.');
@@ -114,13 +126,14 @@ class ChartOfAccountsController
     {
         $v = $r->validate(['company_id' => 'required|integer|min:1', 'version' => 'required|integer|min:1']);
         $company = (int) $v['company_id'];
-        Access::company($r, $company, 'delete');
+        Access::company($r, $company, 'chart.delete');
         DB::transaction(function () use ($r, $id, $company, $v) {
             $this->lock($company);
             $account = DB::table('accounting_accounts')->where('company_id', $company)->where('id', $id)->first();
             abort_unless($account, 404);
             abort_if($account->version !== (int) $v['version'], 409, 'This account was changed by another person. Close this form and reopen the account before deleting.');
             abort_if(DB::table('accounting_journal_lines')->where('account_id', $id)->exists(), 422, 'This account is referenced by a journal. Deactivate it instead of deleting it.');
+            abort_if(DB::table('accounting_cash_basis_review_lines')->where('company_id', $company)->where('account_id', $id)->exists(), 422, 'This account is used in a cash-basis allocation. Deactivate it instead of deleting it.');
             abort_if($account->is_system, 422, 'Root groups cannot be deleted.');
             abort_if(DB::table('accounting_accounts')->where('parent_id', $id)->exists(), 422, 'Move or delete child accounts first.');
             Access::audit($r, $company, 'Account deleted', $account->code.' - '.$account->name, ['account' => (array) $account]);

@@ -19,7 +19,7 @@ class CvBankCareersSettingsTest extends TestCase
     private function employee(): User
     {
         $user=User::factory()->create(['is_active'=>true,'judibas_administrator'=>false]);
-        DB::table('user_product_access')->insert(['user_id'=>$user->id,'product_slug'=>'cv-bank']);
+        \App\Services\UserProductAccess::sync($user,['product_slugs'=>['cv-bank'],'company_ids'=>[\App\Services\CvBankAccess::legacyId()]]);
         return $user;
     }
 
@@ -66,10 +66,10 @@ class CvBankCareersSettingsTest extends TestCase
         $this->assertDatabaseHas('cv_bank_career_editors',['user_id'=>$editor->id]);
     }
 
-    public function test_delegated_editor_can_publish_but_cannot_grant_permission(): void
+    public function test_assigned_hr_can_publish_but_cannot_grant_permission(): void
     {
         $user=$this->employee();
-        $this->actingAs($user)->postJson('/cv-bank/settings',$this->settings())->assertForbidden();
+        $this->actingAs($user)->postJson('/cv-bank/settings',$this->settings())->assertOk();
         DB::table('cv_bank_career_editors')->insert(['user_id'=>$user->id]);
         $this->postJson('/cv-bank/settings',$this->settings(['theme'=>'bloom']))->assertOk();
         $this->get('/careers?theme=studio')->assertOk();

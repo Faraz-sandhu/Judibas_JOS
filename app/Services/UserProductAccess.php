@@ -8,7 +8,7 @@ class UserProductAccess
  public static function rules(): array {return [
   'product_slugs'=>'required|array|min:1','product_slugs.*'=>['required','string','distinct',Rule::in(array_column(config('judibas.products'),'slug'))],
   'company_ids'=>'present|array|max:100','company_ids.*'=>'integer|distinct|exists:communication_companies,id',
-  'accounting_role'=>'sometimes|in:viewer,accountant,manager',
+  'accounting_role'=>['sometimes','string',Rule::exists('accounting_roles','slug')->where('active',true)],
   'daymark_active'=>'sometimes|boolean',
   'daymark_company_id'=>'sometimes|nullable|integer|exists:communication_companies,id',
   'daymark_role'=>'sometimes|in:company_admin,ceo,md,hr,pm,om,employee',
@@ -25,7 +25,9 @@ class UserProductAccess
  ];}
  public static function validateSelection(array $v): void {
   \App\Modules\Daymark\Services\Access::validateSelection($v);
+  if(in_array('accounts',$v['product_slugs'])&&isset($v['accounting_role'])&&!DB::table('accounting_roles')->where('slug',$v['accounting_role'])->where('active',true)->exists())throw \Illuminate\Validation\ValidationException::withMessages(['accounting_role'=>'Choose an active Accounting role.']);
   if(in_array('accounts',$v['product_slugs'])&&!count($v['company_ids'])&&empty($v['judibas_administrator']))throw \Illuminate\Validation\ValidationException::withMessages(['company_ids'=>'Select at least one company for Accounting.']);
+  if(in_array('cv-bank',$v['product_slugs'])&&!count($v['company_ids'])&&empty($v['judibas_administrator']))throw \Illuminate\Validation\ValidationException::withMessages(['company_ids'=>'Select at least one company for CV Bank.']);
   foreach($v['canteen_level_ids']??[] as $company=>$level)if($level!==null&&$level!==''){if(!in_array('canteen',$v['product_slugs'])||!in_array($company,$v['company_ids'])||!DB::table('canteen_levels')->where('id',$level)->where('company_id',$company)->where('active',true)->exists())throw \Illuminate\Validation\ValidationException::withMessages(['canteen_level_ids'=>'Choose an active benefit level belonging to each selected company.']);}
   if(in_array('canteen',$v['product_slugs'])&&!count($v['company_ids'])) throw \Illuminate\Validation\ValidationException::withMessages(['company_ids'=>'Select at least one company for Canteen.']);
   if(in_array('projects',$v['product_slugs'])&&!count($v['company_ids'])) throw \Illuminate\Validation\ValidationException::withMessages(['company_ids'=>'Select at least one company for PMS.']);

@@ -41,6 +41,71 @@ class CommunicationCallTest extends TestCase
         }
     }
 
+    public function test_employee_channel_authorization_survives_shared_settings_reload_for_both_providers(): void
+    {
+        config(['broadcasting.connections.reverb' => ['driver' => 'reverb', 'key' => 'test-key', 'secret' => 'test-secret', 'app_id' => 'test-app', 'options' => ['host' => '127.0.0.1', 'port' => 8080, 'scheme' => 'http', 'useTLS' => false]]]);
+        foreach (['reverb', 'pusher'] as $provider) {
+            $settings = new \App\Models\RealtimeSetting(['enabled' => true]);
+            if ($provider === 'pusher') $settings->fill(['app_id' => 'test-app', 'app_key' => 'test-key', 'app_secret' => 'test-secret', 'cluster' => 'mt1']);
+            cache()->forever('pms.realtime.settings', $settings);
+            \App\Services\PlatformSettings::apply();
+            $this->assertSame($provider, config('broadcasting.default'));
+            $own = 'private-communication.user.'.$this->a->id;
+            $other = 'private-communication.user.'.$this->b->id;
+            $this->actingAs($this->a)->postJson('/broadcasting/auth/batch', ['socket_id' => '123.456', 'channels' => [$own, $other]])->assertOk()->assertJsonStructure(['channels' => [$own => ['data' => ['auth']]]])->assertJson(fn ($json) => $json->where('channels', fn ($channels) => isset($channels[$other]['error']) && $channels[$other]['error'] === 'Channel authorization denied')->etc());
+            $this->postJson('/broadcasting/auth', ['socket_id' => '123.456', 'channel_name' => $own])->assertOk()->assertJsonStructure(['auth']);
+        }
+    }
+
+    private function superChat(User $employee): int
+    {
+        return $this->withSession(['judibas_admin' => true])->postJson('/communication/api/conversations?mode=personal', ['kind' => 'direct', 'member_ids' => [$employee->id]])->assertOk()->json('id');
+    }
+
+    public function test_super_admin_can_call_employee_without_impersonating_a_user(): void
+    {
+        $chat = $this->superChat($this->a);
+        $this->getJson('/communication/api?mode=personal')->assertOk()->assertJsonPath('calling_enabled', true)->assertJsonPath('user_id', 0);
+        $call = $this->postJson('/communication/api/calls?mode=personal', ['conversation_id' => $chat, 'type' => 'audio', 'offer' => ['type' => 'offer', 'sdp' => 'super offer']])->assertCreated()->json('call');
+        $this->assertSame(0, $call['caller_id']);$this->assertSame('Super Admin', $call['caller_name']);
+        $this->assertDatabaseHas('communication_calls', ['id' => $call['id'], 'caller_id' => null, 'callee_id' => $this->a->id]);
+        $this->withSession(['judibas_admin' => false])->actingAs($this->a);
+        $this->getJson('/communication/api/calls/state')->assertOk()->assertJsonPath('offer.sdp', 'super offer');
+        $this->postJson('/communication/api/calls/'.$call['id'].'/signal', ['kind' => 'answer', 'answer' => ['type' => 'answer', 'sdp' => 'employee answer']])->assertOk();
+        $this->withSession(['judibas_admin' => true])->postJson('/communication/api/calls/'.$call['id'].'/signal?mode=personal', ['kind' => 'connected'])->assertOk()->assertJsonPath('call.status', 'active');
+        $this->postJson('/communication/api/calls/'.$call['id'].'/finish?mode=personal', ['status' => 'ended'])->assertOk()->assertJsonPath('call.status', 'ended');
+        Event::assertDispatched(CommunicationCallSignal::class, fn ($event) => $event->recipient === 0 && $event->payload['kind'] === 'answer' && (string)$event->broadcastOn()[0] === 'private-communication.user.super');
+    }
+
+    public function test_employee_can_call_super_admin_but_review_mode_cannot_answer(): void
+    {
+        $chat = $this->superChat($this->a);
+        $this->withSession(['judibas_admin' => false])->actingAs($this->a);
+        $call = $this->postJson('/communication/api/calls', ['conversation_id' => $chat, 'type' => 'audio', 'offer' => ['type' => 'offer', 'sdp' => 'employee offer']])->assertCreated()->json('call');
+        $this->assertSame(0, $call['callee_id']);$this->assertSame('Super Admin', $call['callee_name']);
+        $this->actingAs($this->outsider)->postJson('/communication/api/calls/'.$call['id'].'/signal', ['kind' => 'answer', 'answer' => ['type' => 'answer', 'sdp' => 'forbidden']])->assertForbidden();
+        $this->withSession(['judibas_admin' => true])->getJson('/communication/api/calls/state?mode=personal')->assertOk()->assertJsonPath('offer.sdp', 'employee offer');
+        $body = ['kind' => 'answer', 'answer' => ['type' => 'answer', 'sdp' => 'super answer']];
+        $this->postJson('/communication/api/calls/'.$call['id'].'/signal?mode=review', $body)->assertForbidden();
+        $this->postJson('/communication/api/calls/'.$call['id'].'/signal?mode=personal', $body)->assertOk();
+        $this->postJson('/communication/api/calls/'.$call['id'].'/finish?mode=personal', ['status' => 'ended'])->assertOk();
+    }
+
+    public function test_super_admin_call_history_is_personal_and_busy_protection_is_shared(): void
+    {
+        $first = $this->superChat($this->a);$second = $this->superChat($this->b);
+        $body = fn ($chat) => ['conversation_id' => $chat, 'type' => 'audio', 'offer' => ['type' => 'offer', 'sdp' => 'test offer']];
+        $call = $this->postJson('/communication/api/calls?mode=personal', $body($first))->assertCreated()->json('call');
+        $this->postJson('/communication/api/calls?mode=personal', $body($second))->assertConflict();
+        $this->postJson('/communication/api/calls?mode=personal', $body($this->chat))->assertForbidden();
+        $this->postJson('/communication/api/calls/'.$call['id'].'/finish?mode=personal', ['status' => 'cancelled'])->assertOk();
+        $this->withSession(['judibas_admin' => false]);$employeeCall = $this->start();
+        $this->withSession(['judibas_admin' => true]);
+        $ids = $this->getJson('/communication/api/calls?mode=personal')->assertOk()->json('calls.*.id');
+        $this->assertContains($call['id'], $ids);$this->assertNotContains($employeeCall, $ids);
+        $this->getJson('/communication/api?mode=review')->assertOk()->assertJsonPath('calling_enabled', false);
+    }
+
     private function start(): string
     {
         return $this->actingAs($this->a)->postJson('/communication/api/calls', ['conversation_id' => $this->chat, 'type' => 'audio', 'offer' => ['type' => 'offer', 'sdp' => 'test offer']])->assertCreated()->json('call.id');

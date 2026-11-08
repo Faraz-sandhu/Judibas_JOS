@@ -36,7 +36,7 @@ class Ledger
         $book = DB::table('accounting_books')->where('company_id', $company)->first();
         abort_unless($book, 422, 'Set up the company books before entering transactions.');
 
-        return $book;
+        return GlobalPolicy::apply($book);
     }
 
     public static function checkDate(object $book, string $date): void
@@ -67,12 +67,60 @@ class Ledger
         return $lines;
     }
 
+    public static function validateCashVoucher(int $company, string $kind, array $lines, ?string $person): void
+    {
+        if (!isset(VoucherTypes::TYPES[$kind])) return;
+        [$prefix,$label,$permission,$accountType,$receipt] = VoucherTypes::TYPES[$kind];
+        abort_unless(count($lines)>=2,422,'Add a settlement account and at least one detail line.');
+        abort_if(trim($person ?? '')==='',422,'Enter the person, organisation or payment purpose.');
+        $accounts=DB::table('accounting_accounts')->where('company_id',$company)->whereIn('id',array_column($lines,'account_id'))->get()->keyBy('id');
+        $settlements=0;
+        foreach($lines as $line){
+            $account=$accounts[$line['account_id']];
+            $settlement = $accountType
+                ? $account->root_type==='Asset' && $account->account_type===$accountType
+                : ($receipt ? $line['debit_minor']>0 : $line['credit_minor']>0);
+            if($settlement){
+                $settlements++;
+                abort_unless(in_array($account->root_type,['Asset','Liability']),422,'Use an asset or liability ledger for settlement.');
+            }else{
+                abort_if(in_array($account->account_type,['Cash','Bank','Receivable','Payable']),422,'Use invoice payments for customer/supplier control accounts and journals for cash/bank transfers.');
+                if(!$accountType)abort_unless($account->root_type===($receipt?'Income':'Expense'),422,'Select '.($receipt?'Income':'Expense').' accounts for detail lines.');
+            }
+            $debitSide=$receipt?$settlement:!$settlement;
+            abort_unless(($debitSide?$line['debit_minor']:$line['credit_minor'])>0,422,'The voucher debit/credit direction is incorrect.');
+        }
+        abort_unless($settlements===1,422,'A voucher must contain exactly one settlement account line.');
+    }
+
+    // Call inside the company-locked transaction so concurrent postings cannot overspend.
+    public static function requireCashFunds(int $company, string $kind, string $date, array $lines): void
+    {
+        if (!in_array($kind,['cash_payment','bank_payment','expense'])) return;
+        $cashIds = DB::table('accounting_accounts')->where('company_id', $company)
+            ->where('root_type', 'Asset')->whereIn('account_type', ['Cash','Bank'])->pluck('id')->all();
+        foreach ($lines as $line) {
+            if (! in_array($line['account_id'], $cashIds, true)) continue;
+            $balance = (int) DB::table('accounting_journal_lines as l')
+                ->join('accounting_journals as j', 'j.id', '=', 'l.journal_id')
+                ->where('j.company_id', $company)->where('l.company_id', $company)
+                ->where('l.account_id', $line['account_id'])->whereIn('j.status', ['posted', 'reversed'])
+                ->where('j.posting_date', '<=', $date)
+                ->selectRaw('COALESCE(SUM(l.debit_minor - l.credit_minor), 0) as balance')->value('balance');
+            $currency = self::book($company)->currency;
+            abort_if($line['credit_minor'] > $balance, 422,
+                'Insufficient '.($kind==='cash_payment'?'cash':'cash/bank').' balance on '.$date.'. Available: '.$currency.' '.self::money($balance).
+                '. Payment: '.$currency.' '.self::money($line['credit_minor']).'.');
+        }
+    }
+
     public static function document(int $company, int $id): array
     {
         $row = DB::table('accounting_journals')->where('company_id', $company)->where('id', $id)->first();
         abort_unless($row, 404);
         $lines = DB::table('accounting_journal_lines as l')->join('accounting_accounts as a', 'a.id', '=', 'l.account_id')->where('l.journal_id', $id)->orderBy('l.position')->get(['l.*', 'a.code as account_code', 'a.name as account_name']);
         $row->lines = $lines->map(fn ($l) => array_merge((array) $l, ['debit' => self::money($l->debit_minor), 'credit' => self::money($l->credit_minor)]));
+        $row->approval = ApprovalFlow::approval($company,'journal',$id);
         $row->total = self::money((int) $lines->sum('debit_minor'));
         $row->reversal_id = DB::table('accounting_journals')->where('reversal_of', $id)->value('id');
 
@@ -84,7 +132,9 @@ class Ledger
         abort_unless($journal->status === 'draft', 409, 'Only a draft can be posted.');
         self::checkDate(self::book($company), $journal->posting_date);
         $lines = DB::table('accounting_journal_lines')->where('journal_id', $journal->id)->get()->map(fn ($l) => ['account_id' => $l->account_id, 'debit' => self::money($l->debit_minor), 'credit' => self::money($l->credit_minor), 'description' => $l->description])->all();
-        self::lines($company, $lines);
+        $validated = self::lines($company, $lines);
+        self::validateCashVoucher($company, $journal->kind, $validated, $journal->voucher_person ?? null);
+        self::requireCashFunds($company, $journal->kind, $journal->posting_date, $validated);
         DB::table('accounting_journals')->where('id', $journal->id)->update(['status' => 'posted', 'posted_by' => $r->user()?->id, 'posted_at' => now(), 'version' => $journal->version + 1, 'updated_at' => now()]);
         AccountingAccess::audit($r, $company, 'Journal posted', $journal->number);
     }

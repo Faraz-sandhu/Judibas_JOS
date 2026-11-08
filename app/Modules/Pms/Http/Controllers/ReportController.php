@@ -36,7 +36,7 @@ class ReportController extends Controller
         }
         $projects = $projectsQuery->orderBy('name')->get();
 
-        $users = User::query()
+        $users = User::query()->where(function($q){\App\Modules\Pms\Services\PmsCompanyContext::users($q);})
             ->select('id', 'name')
             ->when(! $canViewAll && \App\Modules\Pms\Services\PmsVisibility::teamTasks(), fn (Builder $query) => $query
                 ->whereHas('departments', fn (Builder $departments) => $departments->whereIn('pms_departments.id', $departmentIds)))
@@ -49,7 +49,7 @@ class ReportController extends Controller
             ->orderBy('name')
             ->get(['id', 'name']);
 
-        $departments = Department::query()
+        $departments = Department::query()->when(\App\Modules\Pms\Services\PmsCompanyContext::selected(),fn($q)=>$q->whereHas('projects'))
             ->when(! $canViewAll, fn (Builder $query) => $query->whereIn('id', $departmentIds))
             ->orderBy('dept_name')
             ->get(['id', 'dept_name']);
@@ -165,7 +165,7 @@ class ReportController extends Controller
         }
 
         $canViewUser = \App\Modules\Pms\Services\PmsVisibility::teamTasks()
-            ? User::query()
+            ? User::query()->where(function($q){\App\Modules\Pms\Services\PmsCompanyContext::users($q);})
                 ->whereKey($filters['user_id'])
                 ->whereHas('departments', fn (Builder $departments) => $departments
                     ->whereIn('pms_departments.id', $departmentIds))
