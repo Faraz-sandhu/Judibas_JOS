@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 const browser=await chromium.launch({channel:'msedge',headless:true});
 try{
  const page=await browser.newPage({viewport:{width:1440,height:1000},serviceWorkers:'block'}),errors=[];page.on('pageerror',e=>{errors.push(e.message);console.log('Browser error:',e.message);});
- 
+
  let created=false;const writes=[],messages=[];
  const person={id:41,name:'Demo employee',email:'employee@example.test',company_id:1,company_ids:[1]};
  const own={id:21,kind:'direct',name:'Demo employee',members:[person],preview:'No messages yet',last_message_at:null,unread:0};
