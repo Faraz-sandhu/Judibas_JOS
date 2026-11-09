@@ -4,6 +4,7 @@ return [
     'admin_email' => env('JUDIBAS_ADMIN_EMAIL', 'admin@gmail.com'),
     'admin_password_hash' => env('JUDIBAS_ADMIN_PASSWORD_HASH'),
     'products' => [
+        ['slug'=>'focus-to-do','workspace'=>'/focus-to-do','name'=>'Focus To Do','category'=>'Productivity','icon'=>'F','color'=>'#7762ee','description'=>'Plan your tasks, focus deeply and build productive habits','features'=>['Tasks, projects and recurring plans','Pomodoro and stopwatch timers','Focus reports and daily goals','Company groups, forest and rankings']],
         ['slug'=>'daymark','workspace'=>'/daymark','name'=>'Daymark','category'=>'Collaboration','icon'=>'D','color'=>'#6c5ce7','description'=>'Daily progress reports, team reviews and monthly reporting','features'=>['Daily reports and private drafts','Manager reviews and feedback','Monthly summaries and exports','Reporting assignments and permissions']],
         ['slug' => 'cv-bank', 'workspace' => '/cv-bank', 'name' => 'CV Bank', 'category' => 'Human resources', 'icon' => 'CV', 'color' => '#2563eb', 'description' => 'Collect, organise and review candidates by department and job', 'features' => ['Career applications', 'Job listings', 'Department pipelines', 'Private CV storage']],
         ['slug' => 'canteen', 'workspace' => '/canteen', 'name' => 'Canteen', 'category' => 'Operations', 'icon' => 'C', 'color' => '#d97706', 'description' => 'Employee meals, benefits, ordering and canteen operations', 'features' => ['Employee benefits', 'Menu and allowances', 'Kitchen and cashier', 'Consumption reports']],

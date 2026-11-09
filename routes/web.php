@@ -150,6 +150,7 @@ require __DIR__.'/pms.php';
 require __DIR__.'/canteen.php';
 
 require __DIR__.'/daymark.php';
+require __DIR__.'/focus.php';
 
 require __DIR__.'/accounting.php';
 

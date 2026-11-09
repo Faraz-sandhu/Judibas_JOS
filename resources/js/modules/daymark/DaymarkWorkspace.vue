@@ -2,7 +2,7 @@
 import {workspaceCompany,replaceCompanyWorkspace} from '../../companyWorkspace';
 import {connectDaymark} from './realtime';
 import {ref,computed,onMounted,watch,onBeforeUnmount} from 'vue';
-import AdminDialog from '../../AdminDialog.vue';import Pagination from '../../CvBankPagination.vue';import Editor from './DaymarkEditor.vue';import './daymark.css';
+import AdminDialog from '../../AdminDialog.vue';import Pagination from '../../components/Pagination.vue';import Editor from './DaymarkEditor.vue';import './daymark.css';
 const props=defineProps<{csrf?:string}>();
 const today=new Date().toLocaleDateString('en-CA'),month=ref(today.slice(0,7)),date=ref(today),company=ref(workspaceCompany('daymark')==='all'?'':workspaceCompany('daymark')),employee=ref(''),department=ref(''),status=ref(''),search=ref(''),page=ref(1),size=ref(12),monthlyTab=ref('people');
 const reportFilter=ref('');

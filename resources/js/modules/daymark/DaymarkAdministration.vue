@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import {computed,ref,watch} from 'vue';
 import AdminDialog from '../../AdminDialog.vue';
-import Pagination from '../../CvBankPagination.vue';
+import Pagination from '../../components/Pagination.vue';
 const props=defineProps<{data:any;csrf?:string}>();const emit=defineEmits(['changed']);
 const tab=ref('departments'),company=ref(''),search=ref(''),page=ref(1),size=ref(12),editing=ref(''),form=ref<any>({}),busy=ref(false),error=ref(''),message=ref('');
 const roles:Record<string,string>={employee:'Employee',pm:'Project Manager',om:'Operations Manager',hr:'Human Resources',ceo:'CEO',md:'Managing Director',company_admin:'Company Admin'};

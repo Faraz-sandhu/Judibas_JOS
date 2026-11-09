@@ -69,3 +69,5 @@ Schedule::call(fn()=>\App\Http\Controllers\CommunicationCallController::expire()
 
 Schedule::command('pms:send-reminders')->dailyAt('09:00')->when(fn()=>config('pms.reminders_enabled',false))->withoutOverlapping();
 Schedule::command('judibas:backup')->everyMinute()->when(function(){ $s=DB::table('platform_backup_settings')->first(); if(!$s||!$s->enabled||now($s->timezone??'Asia/Karachi')->format('H:i')!==$s->time)return false; $now=now($s->timezone??'Asia/Karachi'); $day=$now->dayOfYear; return $s->frequency==='daily'||($s->frequency==='every_2_days'&&$day%2===0)||($s->frequency==='weekly'&&$now->isMonday())||($s->frequency==='every_15_days'&&in_array($now->day,[1,16],true))||($s->frequency==='monthly'&&$now->day===1); })->withoutOverlapping();
+
+Schedule::call(fn()=>\App\Modules\Focus\Services\FocusService::tick())->name('focus-reminders')->everyMinute()->withoutOverlapping();

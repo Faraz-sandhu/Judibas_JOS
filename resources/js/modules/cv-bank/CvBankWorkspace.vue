@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import {workspaceCompany,replaceCompanyWorkspace} from './companyWorkspace';
+import {workspaceCompany,replaceCompanyWorkspace} from '../../companyWorkspace';
 import {computed,onMounted,ref,watch} from 'vue';
-import CvBankPagination from './CvBankPagination.vue';
+import CvBankPagination from '../../components/Pagination.vue';
 import CvBankSettings from './CvBankSettings.vue';
 defineProps<{csrf?:string|null}>();
 const company=ref(workspaceCompany('cv-bank')||'');
