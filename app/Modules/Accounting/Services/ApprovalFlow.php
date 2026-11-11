@@ -37,6 +37,7 @@ class ApprovalFlow
             Ledger::requireManual($company,$id);$detail=Ledger::document($company,$id);$permission=Permissions::journalGroup($row->kind);
         }elseif($type==='invoice'){$detail=TradeDocuments::invoice($company,$id);$permission=$row->kind==='sale'?'sales':'purchases';}
         else{$payload=json_decode($row->payload,true);$invoice=DB::table('accounting_invoices')->where('company_id',$company)->where('id',$row->invoice_id)->first();$detail=(array)$row+['number'=>'PAYREQ-'.str_pad((string)$id,7,'0',STR_PAD_LEFT),'posting_date'=>$payload['posting_date'],'total'=>$payload['amount'],'party_name'=>$invoice->party_name,'reference'=>$payload['reference'],'payload'=>$payload];$permission='payments';}
+        $base=Ledger::book($company)->currency;$detail['total_currency']=$type==='payment'?($payload['currency']??$base):$base;
         return ['row'=>$row,'detail'=>$detail,'permission'=>$permission];
     }
 
@@ -72,7 +73,7 @@ class ApprovalFlow
         $old=DB::table('accounting_payment_requests')->where('company_id',$company)->where('request_key',$payload['request_key'])->first();
         if($old){abort_unless($old->invoice_id===$invoice&&json_decode($old->payload,true)===$payload&&$old->status!=='cancelled',409,'This payment request key belongs to another or cancelled payment.');return;}
         $reserved=DB::table('accounting_payment_requests')->where('company_id',$company)->where('invoice_id',$invoice)->where('status','draft')->get()->sum(fn($p)=>Ledger::minor(json_decode($p->payload,true)['amount']));
-        $inv=TradeDocuments::invoice($company,$invoice);abort_if(Ledger::minor($payload['amount'])+$reserved>Ledger::minor($inv['outstanding']),422,'Posted and pending payments would exceed this invoice balance.');
+        $inv=TradeDocuments::invoice($company,$invoice);abort_if(Ledger::minor($payload['amount'])+$reserved>Ledger::minor($inv['foreign_outstanding']??$inv['outstanding']),422,'Posted and pending payments would exceed this invoice balance.');
         $id=DB::table('accounting_payment_requests')->insertGetId(['company_id'=>$company,'invoice_id'=>$invoice,'request_key'=>$payload['request_key'],'payload'=>json_encode($payload),'created_by'=>$r->user()?->id,'status'=>'draft','created_at'=>now(),'updated_at'=>now()]);
         self::submit($r,$company,'payment',$id,1,'Payment prepared and submitted for approval.');
     }

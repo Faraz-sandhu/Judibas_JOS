@@ -30,7 +30,7 @@ class ChartOfAccountsController
         $book=$company?DB::table('accounting_books')->where('company_id',$company)->first():null;
         if($book)$book=\App\Modules\Accounting\Services\GlobalPolicy::apply($book);
         if($book)$book->approval_types=\App\Modules\Accounting\Services\ApprovalPolicy::selected($book);
-        return ['can_view_all'=>\App\Services\PlatformAccess::administrator($r), 'global_policy'=>\App\Modules\Accounting\Services\GlobalPolicy::get(), 'is_super_admin'=>\App\Services\PlatformAccess::super($r), 'companies' => $companies, 'company_id' => $company ?: null, 'role' => $role, 'book' => $book, 'permissions' => \App\Modules\Accounting\Services\Permissions::effective($r), 'role_name' => DB::table('accounting_roles')->where('slug', $role)->value('name') ?? 'Accounting Manager', 'can_manage' => count(array_filter(\App\Modules\Accounting\Services\Permissions::effective($r), fn ($p) => preg_match('/\.(create|update|post)$/', $p))) > 0, 'can_delete' => \App\Modules\Accounting\Services\Permissions::can($r, 'chart.delete'), 'account_types' => self::TYPES, 'accounts' => $company ? (\App\Modules\Accounting\Services\Permissions::can($r, 'chart.view') ? ChartSummary::accounts($company) : DB::table('accounting_accounts')->where('company_id', $company)->orderBy('code')->get(['id','company_id','parent_id','code','name','root_type','account_type','is_group','is_system','active','version','description'])) : []];
+        return ['can_view_all'=>\App\Services\PlatformAccess::administrator($r), 'global_policy'=>\App\Modules\Accounting\Services\GlobalPolicy::get(), 'is_super_admin'=>\App\Services\PlatformAccess::super($r), 'companies' => $companies, 'company_id' => $company ?: null, 'role' => $role, 'book' => $book, 'permissions' => \App\Modules\Accounting\Services\Permissions::effective($r), 'role_name' => DB::table('accounting_roles')->where('slug', $role)->value('name') ?? 'Accounting Manager', 'can_manage' => count(array_filter(\App\Modules\Accounting\Services\Permissions::effective($r), fn ($p) => preg_match('/\.(create|update|post)$/', $p))) > 0, 'can_delete' => \App\Modules\Accounting\Services\Permissions::can($r, 'chart.delete'), 'account_types' => self::TYPES, 'accounts' => $company ? (\App\Modules\Accounting\Services\Permissions::can($r, 'chart.view') ? ChartSummary::accounts($company) : DB::table('accounting_accounts')->where('company_id', $company)->orderBy('code')->get(['id','company_id','parent_id','code','name','root_type','account_type','is_group','is_system','active','version','description','currency'])) : []];
     }
 
     private function lock(int $company): void
@@ -71,7 +71,7 @@ class ChartOfAccountsController
 
     public function save(Request $r)
     {
-        $v = $r->validate(['version' => [Rule::requiredIf(fn () => $r->filled('id')), 'integer', 'min:1'], 'id' => 'nullable|integer|min:1', 'company_id' => 'required|integer|min:1', 'parent_id' => 'required|integer|min:1', 'code' => ['nullable', 'string', 'max:255', 'regex:/^[A-Za-z0-9][A-Za-z0-9.\-]*$/'], 'name' => 'required|string|max:150', 'root_type' => ['required', Rule::in(array_keys(self::TYPES))], 'account_type' => 'required|string', 'is_group' => 'required|boolean', 'active' => 'required|boolean', 'description' => 'nullable|string|max:2000']);
+        $v = $r->validate(['version' => [Rule::requiredIf(fn () => $r->filled('id')), 'integer', 'min:1'], 'id' => 'nullable|integer|min:1', 'company_id' => 'required|integer|min:1', 'parent_id' => 'required|integer|min:1', 'code' => ['nullable', 'string', 'max:255', 'regex:/^[A-Za-z0-9][A-Za-z0-9.\-]*$/'], 'name' => 'required|string|max:150', 'root_type' => ['required', Rule::in(array_keys(self::TYPES))], 'account_type' => 'required|string', 'is_group' => 'required|boolean', 'active' => 'required|boolean', 'description' => 'nullable|string|max:2000','currency'=>'nullable|string|size:3']);
         $company = (int) $v['company_id'];
         Access::company($r, $company, $r->filled('id') ? 'chart.update' : 'chart.create');
         $v['code'] = strtoupper(trim($v['code'] ?? ''));
@@ -105,6 +105,11 @@ class ChartOfAccountsController
             abort_if((clone $q)->where('code', $v['code'])->when($old, fn ($query) => $query->where('id', '!=', $old->id))->exists(), 422, 'This account code is already used in this company.');
             abort_unless(in_array($v['account_type'], self::TYPES[$v['root_type']], true), 422, 'Choose an account type for this root.');
             abort_if($v['is_group'] && $v['account_type'] !== 'General', 422, 'Group accounts use the General account type.');
+            $currency=$v['currency']??null;$base=DB::table('accounting_books')->where('company_id',$company)->value('currency')??'PKR';
+            if($currency===$base)$currency=null;
+            abort_if($currency&&(!in_array($currency,\App\Modules\Accounting\Services\Currency::CODES,true)||$v['is_group']||!in_array($v['account_type'],['Cash','Bank'])),422,'Foreign account currency is supported on cash/bank ledger accounts only.');
+            abort_if($old&&($old->currency??null)!==$currency&&(DB::table('accounting_journal_lines')->where('account_id',$old->id)->exists()||DB::table('accounting_invoices')->where('control_account_id',$old->id)->exists()),422,'An account currency cannot change after it is used.');
+            $v['currency']=$currency;
             $values = collect($v)->except(['id', 'version'])->all();
             $values['version'] = $old ? $old->version + 1 : 1;
             $values['updated_at'] = now();

@@ -23,8 +23,8 @@ class BooksController
             abort_unless($open < $close,422,'Expense voucher opening time must be before its closing time.');
             if($open!==($global->expense_open_time??'11:00')||$close!==($global->expense_close_time??'20:00'))
                 abort_unless(\App\Services\PlatformAccess::super($r),403,'Only Super Admin can change expense voucher hours.');
-            $hasEntries = DB::table('accounting_journals')->where('company_id', $company)->exists();
-            abort_if($old && $hasEntries && ($old->currency !== $v['currency'] || $old->start_date !== $v['start_date']), 422, 'Currency and start date cannot change after the first journal is created.');
+            $hasEntries = DB::table('accounting_journals')->where('company_id',$company)->exists() || DB::table('accounting_invoices')->where('company_id',$company)->exists() || DB::table('accounting_intercompany_orders')->where(fn($q)=>$q->where('buyer_company_id',$company)->orWhere('seller_company_id',$company))->exists() || DB::table('accounting_exchange_rates')->where('company_id',$company)->exists();
+            abort_if($old && $hasEntries && ($old->currency !== $v['currency'] || $old->start_date !== $v['start_date']), 422, 'Currency and start date cannot change after accounting documents or exchange rates have been created.');
             abort_if($old?->locked_through && (! $r->filled('locked_through') || $v['locked_through'] < $old->locked_through), 422, 'A closed period cannot be reopened from these settings.');
             $enabled=(bool)($v['approval_required']??$global->approval_required??true);
             $types=$v['approval_types']??ApprovalPolicy::selected($global);

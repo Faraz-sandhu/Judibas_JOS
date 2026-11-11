@@ -59,6 +59,8 @@ class CashBasisProfit
             }
         }
 
+        $fxLines=DB::table('accounting_journal_lines as l')->join('accounting_journals as j','j.id','=','l.journal_id')->join('accounting_payments as p',fn($q)=>$q->on('p.journal_id','=',DB::raw('COALESCE(j.reversal_of,j.id)')))->where('j.company_id',$company)->where('p.company_id',$company)->where('l.company_id',$company)->whereColumn('l.account_id','p.exchange_account_id')->whereIn('j.status',['posted','reversed'])->whereBetween('j.posting_date',[$from,$to])->get(['l.*']);
+        foreach($fxLines as $line){$a=$accounts[$line->account_id];$add($a->id,$a->root_type==='Income'?$line->credit_minor-$line->debit_minor:$line->debit_minor-$line->credit_minor);}
         // Direct cash/bank journals and cash vouchers. Invoice/payment sources are handled above exactly once.
         $manual = DB::table('accounting_journals as j')->where('j.company_id', $company)
             ->whereIn('j.status', ['posted', 'reversed'])->whereBetween('j.posting_date', [$from, $to])

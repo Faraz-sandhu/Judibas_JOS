@@ -101,6 +101,11 @@ class Ledger
             ->where('root_type', 'Asset')->whereIn('account_type', ['Cash','Bank'])->pluck('id')->all();
         foreach ($lines as $line) {
             if (! in_array($line['account_id'], $cashIds, true)) continue;
+            $account=DB::table('accounting_accounts')->find($line['account_id']);
+            if($account->currency){
+                $foreignBalance=(int)DB::table('accounting_journal_lines as l')->join('accounting_journals as j','j.id','=','l.journal_id')->where('l.company_id',$company)->where('j.company_id',$company)->where('l.account_id',$account->id)->whereIn('j.status',['posted','reversed'])->where('j.posting_date','<=',$date)->selectRaw('COALESCE(SUM(COALESCE(l.foreign_debit_minor,0)-COALESCE(l.foreign_credit_minor,0)),0) as balance')->value('balance');
+                abort_if(($line['foreign_credit_minor']??0)>$foreignBalance,422,'Insufficient '.$account->currency.' balance. Available: '.self::money($foreignBalance).'.');
+            }
             $balance = (int) DB::table('accounting_journal_lines as l')
                 ->join('accounting_journals as j', 'j.id', '=', 'l.journal_id')
                 ->where('j.company_id', $company)->where('l.company_id', $company)
@@ -119,7 +124,8 @@ class Ledger
         $row = DB::table('accounting_journals')->where('company_id', $company)->where('id', $id)->first();
         abort_unless($row, 404);
         $lines = DB::table('accounting_journal_lines as l')->join('accounting_accounts as a', 'a.id', '=', 'l.account_id')->where('l.journal_id', $id)->orderBy('l.position')->get(['l.*', 'a.code as account_code', 'a.name as account_name']);
-        $row->lines = $lines->map(fn ($l) => array_merge((array) $l, ['debit' => self::money($l->debit_minor), 'credit' => self::money($l->credit_minor)]));
+        $row->lines = $lines->map(fn ($l) => array_merge((array) $l, ['debit' => self::money($l->foreign_debit_minor??$l->debit_minor), 'credit' => self::money($l->foreign_credit_minor??$l->credit_minor),'base_debit'=>self::money($l->debit_minor),'base_credit'=>self::money($l->credit_minor)]));
+        $row->currency=$row->currency??self::book($company)->currency;
         $row->approval = ApprovalFlow::approval($company,'journal',$id);
         $row->total = self::money((int) $lines->sum('debit_minor'));
         $row->reversal_id = DB::table('accounting_journals')->where('reversal_of', $id)->value('id');
@@ -133,8 +139,11 @@ class Ledger
         self::checkDate(self::book($company), $journal->posting_date);
         $lines = DB::table('accounting_journal_lines')->where('journal_id', $journal->id)->get()->map(fn ($l) => ['account_id' => $l->account_id, 'debit' => self::money($l->debit_minor), 'credit' => self::money($l->credit_minor), 'description' => $l->description])->all();
         $validated = self::lines($company, $lines);
+        $originalLines=DB::table('accounting_journal_lines')->where('journal_id',$journal->id)->get();
+        foreach($originalLines as $line){$a=DB::table('accounting_accounts')->find($line->account_id);Currency::account($a,$line->currency??self::book($company)->currency,$company);}
+        Currency::checkOutflows($company,$originalLines->map(fn($l)=>(array)$l)->all(),$journal->posting_date);
         self::validateCashVoucher($company, $journal->kind, $validated, $journal->voucher_person ?? null);
-        self::requireCashFunds($company, $journal->kind, $journal->posting_date, $validated);
+        self::requireCashFunds($company, $journal->kind, $journal->posting_date, $originalLines->map(fn($l)=>(array)$l)->all());
         DB::table('accounting_journals')->where('id', $journal->id)->update(['status' => 'posted', 'posted_by' => $r->user()?->id, 'posted_at' => now(), 'version' => $journal->version + 1, 'updated_at' => now()]);
         AccountingAccess::audit($r, $company, 'Journal posted', $journal->number);
     }
@@ -152,10 +161,10 @@ class Ledger
             self::checkDate(self::book($company), $v['posting_date']);
             abort_if($v['posting_date'] < $original->posting_date, 422, 'A reversal cannot be dated before the original entry.');
             $number = DB::table('accounting_journals')->where('company_id', $company)->count() + 1;
-            $rid = DB::table('accounting_journals')->insertGetId(['company_id' => $company, 'request_key' => (string) \Illuminate\Support\Str::uuid(), 'number' => 'JV-'.str_pad((string) $number, 7, '0', STR_PAD_LEFT), 'posting_date' => $v['posting_date'], 'kind' => 'reversal', 'remarks' => 'Reversal of '.$original->number.': '.trim($v['reason']), 'reversal_of' => $id, 'reversal_reason' => trim($v['reason']), 'created_by' => $r->user()?->id, 'created_at' => now(), 'updated_at' => now()]);
+            $rid = DB::table('accounting_journals')->insertGetId(['company_id' => $company, 'request_key' => (string) \Illuminate\Support\Str::uuid(), 'number' => 'JV-'.str_pad((string) $number, 7, '0', STR_PAD_LEFT), 'posting_date' => $v['posting_date'], 'currency'=>$original->currency,'exchange_rate'=>$original->exchange_rate,'kind' => 'reversal', 'remarks' => 'Reversal of '.$original->number.': '.trim($v['reason']), 'reversal_of' => $id, 'reversal_reason' => trim($v['reason']), 'created_by' => $r->user()?->id, 'created_at' => now(), 'updated_at' => now()]);
             $lines = DB::table('accounting_journal_lines')->where('journal_id', $id)->get();
             foreach ($lines as $l) {
-                DB::table('accounting_journal_lines')->insert(['company_id' => $company, 'journal_id' => $rid, 'account_id' => $l->account_id, 'position' => $l->position, 'debit_minor' => $l->credit_minor, 'credit_minor' => $l->debit_minor, 'description' => $l->description, 'party_id' => $l->party_id]);
+                DB::table('accounting_journal_lines')->insert(['company_id' => $company, 'journal_id' => $rid, 'account_id' => $l->account_id, 'position' => $l->position, 'debit_minor' => $l->credit_minor, 'credit_minor' => $l->debit_minor, 'description' => $l->description, 'party_id' => $l->party_id,'currency'=>$l->currency,'exchange_rate'=>$l->exchange_rate,'foreign_debit_minor'=>$l->foreign_credit_minor,'foreign_credit_minor'=>$l->foreign_debit_minor]);
             }
             // A reversal must remain possible after a ledger account has been deactivated.
             DB::table('accounting_journals')->where('id', $rid)->update(['status' => 'posted', 'posted_by' => $r->user()?->id, 'posted_at' => now(), 'version' => 2, 'updated_at' => now()]);

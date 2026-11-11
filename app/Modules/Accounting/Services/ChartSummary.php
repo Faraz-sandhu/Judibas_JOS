@@ -30,7 +30,7 @@ class ChartSummary
             ->join('accounting_journals as j', 'j.id', '=', 'l.journal_id')
             ->where('j.company_id', $company)->where('l.company_id', $company)
             ->whereIn('j.status', ['posted', 'reversed'])->where('j.posting_date', '<=', now()->toDateString())
-            ->groupBy('l.account_id')->selectRaw('l.account_id, SUM(l.debit_minor) as debit, SUM(l.credit_minor) as credit')->get()->keyBy('account_id');
+            ->groupBy('l.account_id')->selectRaw('l.account_id, SUM(l.debit_minor) as debit, SUM(l.credit_minor) as credit, SUM(COALESCE(l.foreign_debit_minor,0)-COALESCE(l.foreign_credit_minor,0)) as foreign_balance')->get()->keyBy('account_id');
         $byId = $accounts->keyBy('id');
         $sums = [];
         foreach ($accounts as $account) {
@@ -47,9 +47,10 @@ class ChartSummary
                 $cursor = $byId->get($cursor->parent_id);
             }
         }
-        return $accounts->map(function ($account) use ($sums) {
+        return $accounts->map(function ($account) use ($sums,$totals) {
             [$debit, $credit] = $sums[$account->id] ?? [0, 0];
             $balance = $debit - $credit;
+            if($account->currency)$account->foreign_balance=Ledger::money((int)($totals->get($account->id)->foreign_balance??0));
             $account->debit = Ledger::money($debit);
             $account->credit = Ledger::money($credit);
             $account->balance = Ledger::money(abs($balance));

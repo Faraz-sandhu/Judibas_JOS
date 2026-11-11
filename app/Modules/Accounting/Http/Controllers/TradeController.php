@@ -3,6 +3,7 @@
 namespace App\Modules\Accounting\Http\Controllers;
 
 use App\Modules\Accounting\Services\{AccountingAccess as Access, Ledger, TradeDocuments as Trade, Permissions, ApprovalFlow};
+use App\Modules\Accounting\Services\Currency;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -63,7 +64,7 @@ class TradeController
 
     public function saveInvoice(Request $r)
     {
-        $v = $r->validate(['company_id' => 'required|integer', 'id' => 'nullable|integer', 'version' => [Rule::requiredIf(fn () => $r->filled('id')), 'integer', 'min:1'], 'kind' => 'required|in:sale,purchase', 'request_key' => 'required|uuid', 'party_id' => 'required|integer', 'posting_date' => 'required|date_format:Y-m-d', 'due_date' => 'required|date_format:Y-m-d|after_or_equal:posting_date', 'control_account_id' => 'required|integer', 'tax_percent' => 'required', 'tax_label' => 'nullable|string|max:150', 'tax_account_id' => 'nullable|integer', 'reference' => 'nullable|string|max:150', 'notes' => 'nullable|string|max:2000', 'lines' => 'required|array|min:1|max:100', 'lines.*.description' => 'required|string|max:250', 'lines.*.quantity' => 'required', 'lines.*.rate' => 'required', 'lines.*.account_id' => 'required|integer']);
+        $v = $r->validate(['company_id' => 'required|integer', 'id' => 'nullable|integer', 'version' => [Rule::requiredIf(fn () => $r->filled('id')), 'integer', 'min:1'], 'kind' => 'required|in:sale,purchase', 'request_key' => 'required|uuid', 'party_id' => 'required|integer', 'posting_date' => 'required|date_format:Y-m-d', 'due_date' => 'required|date_format:Y-m-d|after_or_equal:posting_date', 'control_account_id' => 'required|integer', 'currency'=>'nullable|string|size:3','exchange_rate'=>'nullable', 'tax_percent' => 'required', 'tax_label' => 'nullable|string|max:150', 'tax_account_id' => 'nullable|integer', 'reference' => 'nullable|string|max:150', 'notes' => 'nullable|string|max:2000', 'lines' => 'required|array|min:1|max:100', 'lines.*.description' => 'required|string|max:250', 'lines.*.quantity' => 'required', 'lines.*.rate' => 'required', 'lines.*.account_id' => 'required|integer']);
         $company = (int) $v['company_id'];
         Access::company($r, $company, ($v['kind']==='sale'?'sales':'purchases').($r->filled('id')?'.update':'.create'));
         $id = DB::transaction(function () use ($r, $v, $company) {
@@ -73,6 +74,7 @@ class TradeController
             $party = DB::table('accounting_parties')->where('company_id', $company)->where('id', $v['party_id'])->where('kind', $sale ? 'customer' : 'supplier')->where('active', true)->first();
             abort_unless($party, 422, 'Select an active customer or supplier in this company.');
             Trade::account($company, $v['control_account_id'], [$sale ? 'Receivable' : 'Payable'], [$sale ? 'Asset' : 'Liability']);
+            $fx=Currency::context($company,$v);
             $net = 0;$lines = [];
             foreach ($v['lines'] as $line) {
                 $account = Trade::account($company, $line['account_id'], [], $sale ? ['Income'] : ['Expense', 'Asset']);
@@ -96,10 +98,17 @@ class TradeController
             $q = DB::table('accounting_invoices')->where('company_id', $company);
             $old = isset($v['id']) ? (clone $q)->where('id', $v['id'])->first() : null;
             abort_if(isset($v['id']) && ! $old, 404);
-            $values = ['prepared_by' => $r->user()?->id, 'party_details' => json_encode(collect((array) $party)->only(['email', 'phone', 'address', 'tax_number'])->all()), 'company_name' => DB::table('communication_companies')->where('id', $company)->value('name'), 'party_id' => $party->id, 'party_name' => $party->name, 'kind' => $v['kind'], 'posting_date' => $v['posting_date'], 'due_date' => $v['due_date'], 'control_account_id' => $v['control_account_id'], 'tax_account_id' => $taxRate ? $v['tax_account_id'] : null, 'tax_label' => $taxRate ? $v['tax_label'] : null, 'tax_basis_points' => $taxRate, 'net_minor' => $net, 'tax_minor' => $tax, 'total_minor' => $net + $tax, 'reference' => $v['reference'] ?? null, 'notes' => $v['notes'] ?? null, 'lines' => json_encode($lines)];
+            $foreignNet=$net;$foreignTax=$tax;$foreignTotal=$net+$tax;
+            $baseNet=0;
+            foreach($lines as &$fxLine){$fxLine['foreign_amount_minor']=$fxLine['amount_minor'];$fxLine['amount_minor']=Currency::convert($fxLine['amount_minor'],$fx['exchange_rate']);abort_unless($fxLine['amount_minor']>0,422,'Each invoice line must convert to at least one base-currency minor unit.');$baseNet+=$fxLine['amount_minor'];}unset($fxLine);
+            $net=$baseNet;$tax=Currency::convert($foreignTax,$fx['exchange_rate']);
+            abort_if($net+$tax>Ledger::MAX_MINOR,422,'Converted total exceeds the supported limit.');
+            abort_if($tax<0,422,'Invoice rounding requires adjusting the lines.');
+            $values = $fx+['foreign_net_minor'=>$foreignNet,'foreign_tax_minor'=>$foreignTax,'foreign_total_minor'=>$foreignTotal]+['prepared_by' => $r->user()?->id, 'party_details' => json_encode(collect((array) $party)->only(['email', 'phone', 'address', 'tax_number'])->all()), 'company_name' => DB::table('communication_companies')->where('id', $company)->value('name'), 'party_id' => $party->id, 'party_name' => $party->name, 'kind' => $v['kind'], 'posting_date' => $v['posting_date'], 'due_date' => $v['due_date'], 'control_account_id' => $v['control_account_id'], 'tax_account_id' => $taxRate ? $v['tax_account_id'] : null, 'tax_label' => $taxRate ? $v['tax_label'] : null, 'tax_basis_points' => $taxRate, 'net_minor' => $net, 'tax_minor' => $tax, 'total_minor' => $net + $tax, 'reference' => $v['reference'] ?? null, 'notes' => $v['notes'] ?? null, 'lines' => json_encode($lines)];
             if ($old) {
                 $sourceOrder=DB::table('accounting_intercompany_orders')->where($sale?'sales_invoice_id':'purchase_invoice_id',$old->id)->first();
                 if($sourceOrder){
+                    abort_unless($fx['currency']===$sourceOrder->currency&&$fx['exchange_rate']==='1.000000',422,'Linked company orders currently require their original base currency.');
                     abort_unless((int)$values['party_id']===(int)($sale?$sourceOrder->customer_id:$sourceOrder->supplier_id)&&$net===(int)$sourceOrder->total_minor,422,'The linked order customer/supplier and pre-tax amount cannot change.');
                     $sourceLines=json_decode($sourceOrder->lines,true);
                     $shape=fn($rows)=>array_map(fn($line)=>array_intersect_key($line,array_flip(['description','quantity','rate'])),$rows);
@@ -156,6 +165,12 @@ class TradeController
                 Trade::account($company, $i->tax_account_id, [], [$sale ? 'Liability' : 'Asset']);
                 $lines[] = ['account_id' => $i->tax_account_id, 'debit_minor' => $sale ? 0 : $i->tax_minor, 'credit_minor' => $sale ? $i->tax_minor : 0];
             }
+            $fx=['currency'=>$i->currency??Ledger::book($company)->currency,'exchange_rate'=>number_format((float)$i->exchange_rate,6,'.','')];
+            foreach($lines as $index=>&$fxLine){
+                $foreign=$index===0?($i->foreign_total_minor??$i->total_minor):($index<=count(json_decode($i->lines,true))?(json_decode($i->lines,true)[$index-1]['foreign_amount_minor']??($fxLine['debit_minor']+$fxLine['credit_minor'])):($i->foreign_tax_minor??$i->tax_minor));
+                $d=$fxLine['debit_minor']>0;$fxLine+=Currency::tags($fx,$d?$foreign:0,$d?0:$foreign);
+                $account=DB::table('accounting_accounts')->find($fxLine['account_id']);if($account->currency)Currency::account($account,$fx['currency'],$company);
+            }unset($fxLine);
             $jid = Trade::journal($r, $company, $i->posting_date, $i->number.' - '.$i->party_name, $lines);
             DB::table('accounting_invoices')->where('id', $id)->update(['status' => 'posted', 'journal_id' => $jid, 'version' => $i->version + 1, 'updated_at' => now()]);
             Access::audit($r, $company, 'Invoice posted', $i->number);
@@ -166,7 +181,7 @@ class TradeController
 
     public function payment(Request $r, int $id)
     {
-        $v = $r->validate(['company_id' => 'required|integer', 'request_key' => 'required|uuid', 'posting_date' => 'required|date_format:Y-m-d', 'amount' => 'required', 'bank_account_id' => 'required|integer', 'reference' => 'required|string|max:150']);
+        $v = $r->validate(['company_id' => 'required|integer', 'request_key' => 'required|uuid', 'posting_date' => 'required|date_format:Y-m-d', 'amount' => 'required', 'bank_account_id' => 'required|integer', 'reference' => 'required|string|max:150','currency'=>'nullable|string|size:3','exchange_rate'=>'nullable','exchange_account_id'=>'nullable|integer']);
         $company = (int) $v['company_id'];
         Access::company($r, $company, $r->attributes->has('accounting_approval')?'payments.post':'payments.create');
         $queued=false;
@@ -174,12 +189,33 @@ class TradeController
             Ledger::lock($company);
             $i = DB::table('accounting_invoices')->where('company_id', $company)->where('id', $id)->first();
             abort_unless($i, 404);
-            $amount = Ledger::minor($v['amount']);
-            if ($existing = DB::table('accounting_payments')->where('company_id', $company)->where('request_key', $v['request_key'])->first()) {
-                abort_unless($existing->invoice_id === $id && $existing->amount_minor === $amount && $existing->bank_account_id === (int) $v['bank_account_id'] && $existing->posting_date === $v['posting_date'] && $existing->reference === $v['reference'], 409, 'This request key belongs to another payment.');
-
+            $foreignAmount=Ledger::minor($v['amount']);
+            $invoiceCurrency=$i->currency??Ledger::book($company)->currency;
+            $fx=Currency::context($company,$v+['currency'=>$invoiceCurrency]);
+            abort_unless($fx['currency']===$invoiceCurrency,422,'Settle in the invoice currency. Cross-currency settlement requires a separate bank conversion.');
+            $foreignTotal=$i->foreign_total_minor??$i->total_minor;
+            $foreignPaid=(int)DB::table('accounting_payments')->where('invoice_id',$id)->where('status','posted')->selectRaw('COALESCE(SUM(COALESCE(foreign_amount_minor,amount_minor)),0) as total')->value('total');
+            $existingForeign=DB::table('accounting_payments')->where('company_id',$company)->where('request_key',$v['request_key'])->first();
+            if($existingForeign){
+                abort_unless($existingForeign->invoice_id===$id&&($existingForeign->foreign_amount_minor??$existingForeign->amount_minor)===$foreignAmount&&$existingForeign->bank_account_id===(int)$v['bank_account_id']&&$existingForeign->posting_date===$v['posting_date']&&$existingForeign->reference===$v['reference']&&($existingForeign->currency??Ledger::book($company)->currency)===$fx['currency']&&(float)$existingForeign->exchange_rate===(float)$fx['exchange_rate']&&((int)$existingForeign->exchange_difference_minor===0||$existingForeign->exchange_account_id===($v['exchange_account_id']??null)),409,'This request key belongs to another payment.');
                 return;
             }
+            $outstandingForeign=$foreignTotal-$foreignPaid;
+            abort_unless($foreignAmount>0&&$foreignAmount<=$outstandingForeign,422,'Payment exceeds the outstanding amount in the invoice currency.');
+            $basePaid=(int)DB::table('accounting_payments')->where('invoice_id',$id)->where('status','posted')->when($existingForeign,fn($q)=>$q->where('id','<>',$existingForeign->id))->sum('amount_minor');
+            $remainingBase=$i->total_minor-$basePaid;
+            $amount=$foreignAmount===$outstandingForeign?$remainingBase:Currency::convert($foreignAmount,number_format((float)$i->exchange_rate,6,'.',''));
+            abort_unless($amount>0&&$amount<=$remainingBase,422,'Payment is too small or rounding exceeds the outstanding balance.');
+            $bankAmount=Currency::convert($foreignAmount,$fx['exchange_rate']);
+            abort_unless($bankAmount>0,422,'Converted payment must be greater than zero.');
+            $bank=Trade::account($company,$v['bank_account_id'],['Cash','Bank'],['Asset']);
+            if($bank->currency)Currency::account($bank,$fx['currency'],$company);
+            if($i->kind==='purchase'&&$bank->currency&&!$existingForeign)$bankAmount=Currency::bankCost($company,$bank->id,$foreignAmount,$v['posting_date']);
+            if($existingForeign)$bankAmount=$existingForeign->bank_amount_minor??$existingForeign->amount_minor;
+            $difference=$bankAmount-$amount;
+            $fxAccount=null;
+            if($difference!==0){$gain=($i->kind==='sale')===($difference>0);$fxAccount=Trade::account($company,(int)($v['exchange_account_id']??0),[],[$gain?'Income':'Expense']);abort_if($fxAccount->currency,422,'Exchange gain/loss account must use the base currency.');}
+
             abort_unless($i->status === 'posted', 422, 'Payments require a posted invoice.');
             abort_if($v['posting_date'] < $i->posting_date, 422, 'Payment cannot be before the invoice date.');
             $paid = (int) DB::table('accounting_payments')->where('invoice_id', $id)->where('status', 'posted')->sum('amount_minor');
@@ -187,11 +223,15 @@ class TradeController
             Trade::account($company, $v['bank_account_id'], ['Cash', 'Bank'], ['Asset']);
             Trade::account($company, $i->control_account_id, [$i->kind === 'sale' ? 'Receivable' : 'Payable']);
             Ledger::checkDate(Ledger::book($company),$v['posting_date']);
-            if(\App\Modules\Accounting\Services\ApprovalPolicy::required($company,$i->kind==='sale'?'customer_payment':'supplier_payment')&&!$r->attributes->has('accounting_approval')){ApprovalFlow::queuePayment($r,$company,$id,array_replace($v,['amount'=>Ledger::money($amount)]));$queued=true;return;}
+            if(\App\Modules\Accounting\Services\ApprovalPolicy::required($company,$i->kind==='sale'?'customer_payment':'supplier_payment')&&!$r->attributes->has('accounting_approval')){ApprovalFlow::queuePayment($r,$company,$id,array_replace($v,$fx,['amount'=>Ledger::money($foreignAmount)]));$queued=true;return;}
             $sale = $i->kind === 'sale';
             $number = 'PAY-'.str_pad((string) (DB::table('accounting_payments')->where('company_id', $company)->count() + 1), 7, '0', STR_PAD_LEFT);
-            $jid = Trade::journal($r, $company, $v['posting_date'], $number.' / '.$i->number.' - '.$v['reference'], [['account_id' => $v['bank_account_id'], 'debit_minor' => $sale ? $amount : 0, 'credit_minor' => $sale ? 0 : $amount], ['account_id' => $i->control_account_id, 'party_id' => $i->party_id, 'debit_minor' => $sale ? 0 : $amount, 'credit_minor' => $sale ? $amount : 0]]);
-            DB::table('accounting_payments')->insert(['company_id' => $company, 'invoice_id' => $id, 'request_key' => $v['request_key'], 'number' => $number, 'posting_date' => $v['posting_date'], 'amount_minor' => $amount, 'bank_account_id' => $v['bank_account_id'], 'reference' => $v['reference'], 'journal_id' => $jid, 'created_at' => now(), 'updated_at' => now()]);
+            $bankFx=$bank->currency?array_replace($fx,['exchange_rate'=>$sale?$fx['exchange_rate']:number_format($bankAmount/$foreignAmount,6,'.','')]):['currency'=>Ledger::book($company)->currency,'exchange_rate'=>'1.000000'];
+            $bankForeign=$bank->currency?$foreignAmount:$bankAmount;
+            $paymentLines=[['account_id'=>$bank->id,'debit_minor'=>$sale?$bankAmount:0,'credit_minor'=>$sale?0:$bankAmount]+Currency::tags($bankFx,$sale?$bankForeign:0,$sale?0:$bankForeign),['account_id'=>$i->control_account_id,'party_id'=>$i->party_id,'debit_minor'=>$sale?0:$amount,'credit_minor'=>$sale?$amount:0]+Currency::tags(['currency'=>$invoiceCurrency,'exchange_rate'=>number_format((float)$i->exchange_rate,6,'.','')],$sale?0:$foreignAmount,$sale?$foreignAmount:0)];
+            if($difference!==0){$gain=$sale===($difference>0);$paymentLines[]=['account_id'=>$fxAccount->id,'debit_minor'=>$gain?0:abs($difference),'credit_minor'=>$gain?abs($difference):0,'description'=>'Realised exchange '.($gain?'gain':'loss')];}
+            $jid=Trade::journal($r,$company,$v['posting_date'],$number.' / '.$i->number.' - '.$v['reference'],$paymentLines);
+            DB::table('accounting_payments')->insert($fx+['foreign_amount_minor'=>$foreignAmount,'bank_amount_minor'=>$bankAmount,'exchange_difference_minor'=>$difference,'exchange_account_id'=>$fxAccount?->id]+['company_id' => $company, 'invoice_id' => $id, 'request_key' => $v['request_key'], 'number' => $number, 'posting_date' => $v['posting_date'], 'amount_minor' => $amount, 'bank_account_id' => $v['bank_account_id'], 'reference' => $v['reference'], 'journal_id' => $jid, 'created_at' => now(), 'updated_at' => now()]);
             Access::audit($r, $company, $sale ? 'Customer payment received' : 'Supplier payment made', $number, ['invoice' => $i->number, 'amount' => Ledger::money($amount)]);
         });
 

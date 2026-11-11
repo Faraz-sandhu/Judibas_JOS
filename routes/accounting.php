@@ -20,6 +20,8 @@ Route::get('/accounting/journals/{id}/print', [\App\Modules\Accounting\Http\Cont
 Route::get('/accounting/vouchers/{id}/print', [\App\Modules\Accounting\Http\Controllers\JournalController::class, 'printVoucher'])->whereNumber('id');
 Route::get('/accounting/invoices/{id}/print', [\App\Modules\Accounting\Http\Controllers\TradeController::class, 'printInvoice'])->whereNumber('id');
 Route::prefix('accounting/api')->group(function () {
+    Route::get('currencies', [\App\Modules\Accounting\Http\Controllers\CurrencyController::class,'index']);
+    Route::post('currencies', [\App\Modules\Accounting\Http\Controllers\CurrencyController::class,'save']);
     Route::get('orders', [\App\Modules\Accounting\Http\Controllers\OrderController::class,'index']);
     Route::get('orders/options', [\App\Modules\Accounting\Http\Controllers\OrderController::class,'options']);
     Route::post('orders', [\App\Modules\Accounting\Http\Controllers\OrderController::class,'save']);
