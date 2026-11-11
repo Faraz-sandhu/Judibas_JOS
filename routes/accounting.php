@@ -20,6 +20,11 @@ Route::get('/accounting/journals/{id}/print', [\App\Modules\Accounting\Http\Cont
 Route::get('/accounting/vouchers/{id}/print', [\App\Modules\Accounting\Http\Controllers\JournalController::class, 'printVoucher'])->whereNumber('id');
 Route::get('/accounting/invoices/{id}/print', [\App\Modules\Accounting\Http\Controllers\TradeController::class, 'printInvoice'])->whereNumber('id');
 Route::prefix('accounting/api')->group(function () {
+    Route::get('orders', [\App\Modules\Accounting\Http\Controllers\OrderController::class,'index']);
+    Route::get('orders/options', [\App\Modules\Accounting\Http\Controllers\OrderController::class,'options']);
+    Route::post('orders', [\App\Modules\Accounting\Http\Controllers\OrderController::class,'save']);
+    Route::post('orders/{id}/actions', [\App\Modules\Accounting\Http\Controllers\OrderController::class,'action'])->whereNumber('id');
+    Route::post('orders/{id}/invoices', [\App\Modules\Accounting\Http\Controllers\OrderController::class,'invoices'])->whereNumber('id');
     Route::get('all-companies', [\App\Modules\Accounting\Http\Controllers\AllCompaniesController::class, 'index']);
     Route::get('notifications', [\App\Modules\Accounting\Http\Controllers\NotificationController::class, 'index']);
     Route::post('notifications/read', [\App\Modules\Accounting\Http\Controllers\NotificationController::class, 'read']);

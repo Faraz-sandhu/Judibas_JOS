@@ -12,6 +12,13 @@ class PortalController extends Controller
 {
     public function index(Request $request, ?string $slug = null)
     {
+        // Protect the company-aware catalogue before any theme or company data is built.
+        if ($request->is('products') && ! \App\Services\PlatformAccess::administrator($request) && ! $request->user()?->is_active) {
+            abort_if($request->user(), 403, 'Your account is inactive.');
+            $request->session()->put('url.intended', $request->getRequestUri());
+
+            return redirect('/login');
+        }
         if ($request->is('admin') && ! \App\Services\PlatformAccess::administrator($request)) {
             return redirect('/login');
         }

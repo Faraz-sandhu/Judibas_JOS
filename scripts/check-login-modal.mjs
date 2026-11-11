@@ -1,0 +1,29 @@
+import {chromium,expect} from '@playwright/test';
+import {readFile,mkdir} from 'node:fs/promises';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+const manifest=JSON.parse(await readFile('public/build/manifest.json','utf8')),entry=manifest['resources/js/app.ts'];
+const base='http://judibas-preview.test';let signedIn=false,loginCalls=0,mode='error',release;
+const products=[{slug:'communication',workspace:'/communication',name:'Communication',category:'Collaboration',icon:'C',color:'#16a085',description:'Company conversations',features:[]},{slug:'focus-to-do',workspace:'/focus-to-do',name:'Focus To Do',category:'Productivity',icon:'F',color:'#7458ed',description:'Personal tasks and focus',features:[]}];
+function documentFor(url){const portal={name:'Judibas',tagline:'We build tools for the way our company works.',logo:null,products,product:null,page:null,workspaceCompanies:[],catalogueGroups:[],productsTheme:'classic',productsPage:url.pathname==='/products',loginPage:url.pathname==='/login',settingsPage:false,admin:false,administrator:false,employee:signedIn?{name:'Preview employee',email:'preview@example.test'}:null,announcement:{title:'Workspace',text:'Your company tools, together',url:'/about'},error:null,success:null,validationErrors:[]};return `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="csrf-token" content="preview-only-token">${(entry.css||[]).map(css=>`<link rel="stylesheet" href="/build/${css}">`).join('')}</head><body><script>window.portal=${JSON.stringify(portal)}</script><div id="app"></div><script type="module" src="/build/${entry.file}"></script></body></html>`;}
+const browser=await chromium.launch({channel:'msedge',headless:true});
+try{const page=await browser.newPage({viewport:{width:1400,height:950}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.route('**/*',async route=>{const r=route.request(),url=new URL(r.url());
+  if(url.pathname.startsWith('/build/')){const local=path.resolve('public',url.pathname.slice(1));assert.ok(local.startsWith(path.resolve('public/build')+path.sep));const body=await readFile(local);await route.fulfill({body,contentType:local.endsWith('.css')?'text/css':local.endsWith('.js')?'text/javascript':'application/octet-stream'});return;}
+  if(url.pathname==='/login'&&r.method()==='POST'){loginCalls++;const v=r.postDataJSON();assert.equal(v.email,'preview@example.test');assert.equal(v.password,'preview-only-password');if(mode==='wait')await new Promise(resolve=>release=resolve);if(mode==='error'){await route.fulfill({status:422,json:{message:'The email or password is incorrect, or your account is inactive.'}});return;}signedIn=true;await route.fulfill({json:{redirect:'/products'}});return;}
+  await route.fulfill({contentType:'text/html',body:documentFor(url)});
+ });
+ await page.goto(base+'/');const productsLink=page.locator('.rail').getByRole('link',{name:'Products',exact:true});await productsLink.click();
+ const modal=page.getByRole('dialog',{name:'Welcome back'});await expect(modal).toBeVisible();assert.equal(new URL(page.url()).pathname,'/');
+ await expect(modal.getByLabel('Email address',{exact:true})).toBeFocused();await modal.getByLabel('Email address',{exact:true}).fill('preview@example.test');await modal.getByLabel('Password',{exact:true}).fill('preview-only-password');
+ await modal.getByRole('button',{name:'Show password',exact:true}).click();await expect(modal.getByLabel('Password',{exact:true})).toHaveAttribute('type','text');await modal.getByRole('button',{name:'Hide password',exact:true}).click();
+ await modal.getByRole('button',{name:'Sign in & open Products',exact:true}).click();await expect(modal.getByRole('alert')).toContainText('incorrect');assert.equal(loginCalls,1);
+ await page.keyboard.press('Escape');await expect(modal).not.toBeVisible();await expect(productsLink).toBeFocused();
+ await productsLink.click();await page.screenshot({path:'.preview/login-modal-desktop.png'});
+ await page.evaluate(()=>{document.documentElement.dataset.theme='dark';document.documentElement.classList.add('dark');document.documentElement.style.setProperty('--bg','#17181e');document.documentElement.style.setProperty('--text','#eeeef5');document.documentElement.style.setProperty('--muted','#a0a1b3');document.documentElement.style.setProperty('--line','#333440');});await page.screenshot({path:'.preview/login-modal-dark.png'});
+ await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:'.preview/login-modal-mobile.png'});
+ await modal.getByRole('button',{name:'Close login',exact:true}).click();await expect(modal).not.toBeVisible();
+ await page.getByRole('link',{name:/^Log in/}).click();await expect(modal).toBeVisible();await modal.getByLabel('Email address',{exact:true}).fill('preview@example.test');await modal.getByLabel('Password',{exact:true}).fill('preview-only-password');mode='wait';await modal.getByRole('button',{name:'Sign in & open Products',exact:true}).click();await expect(modal.getByRole('button',{name:'Signing in…',exact:true})).toBeDisabled();await page.keyboard.press('Escape');await expect(modal).toBeVisible();mode='success';release();await page.waitForURL('**/products');
+ assert.equal(loginCalls,2);signedIn=false;await page.goto(base+'/login');await expect(page.getByRole('heading',{name:'Welcome back',exact:true})).toBeVisible();await expect(page.getByRole('dialog')).toHaveCount(0);assert.equal(errors.length,0,errors.join('\n'));
+ console.log('Login modal checks passed: click interception, autofocus, password visibility, errors, close/focus restoration, dark/mobile layout, loading/double-submit protection, redirect and standalone login.');
+}finally{await browser.close();}

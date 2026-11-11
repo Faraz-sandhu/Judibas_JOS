@@ -31,6 +31,7 @@ class ActivityNotifications
         $journalId=preg_match('/^Journal #(\d+)$/',$subject,$m)?(int)$m[1]:null;
         $journal=DB::table('accounting_journals')->where('company_id',$company)->when($journalId,fn($q)=>$q->where('id',$journalId),fn($q)=>$q->where('number',$subject))->first(['kind','number']);
         if($journal){$section=isset(VoucherTypes::TYPES[$journal->kind])?'single-vouchers':'journals';$display=$journal->number;}
+        elseif(preg_match('/^IC-(\d+)$/',$subject,$orderMatch)){ $order=DB::table('accounting_intercompany_orders')->find((int)$orderMatch[1]);if($order){$section=(int)$order->buyer_company_id===$company?'purchase-orders':'sales-orders';}}
         elseif(str_contains(strtolower($action),'role'))$section='roles';
         elseif(str_contains(strtolower($action),'books'))$section='books';
         elseif(str_contains(strtolower($action),'account')||str_contains(strtolower($action),'chart'))$section='chart';

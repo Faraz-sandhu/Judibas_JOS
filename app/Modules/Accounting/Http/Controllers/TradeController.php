@@ -98,6 +98,13 @@ class TradeController
             abort_if(isset($v['id']) && ! $old, 404);
             $values = ['prepared_by' => $r->user()?->id, 'party_details' => json_encode(collect((array) $party)->only(['email', 'phone', 'address', 'tax_number'])->all()), 'company_name' => DB::table('communication_companies')->where('id', $company)->value('name'), 'party_id' => $party->id, 'party_name' => $party->name, 'kind' => $v['kind'], 'posting_date' => $v['posting_date'], 'due_date' => $v['due_date'], 'control_account_id' => $v['control_account_id'], 'tax_account_id' => $taxRate ? $v['tax_account_id'] : null, 'tax_label' => $taxRate ? $v['tax_label'] : null, 'tax_basis_points' => $taxRate, 'net_minor' => $net, 'tax_minor' => $tax, 'total_minor' => $net + $tax, 'reference' => $v['reference'] ?? null, 'notes' => $v['notes'] ?? null, 'lines' => json_encode($lines)];
             if ($old) {
+                $sourceOrder=DB::table('accounting_intercompany_orders')->where($sale?'sales_invoice_id':'purchase_invoice_id',$old->id)->first();
+                if($sourceOrder){
+                    abort_unless((int)$values['party_id']===(int)($sale?$sourceOrder->customer_id:$sourceOrder->supplier_id)&&$net===(int)$sourceOrder->total_minor,422,'The linked order customer/supplier and pre-tax amount cannot change.');
+                    $sourceLines=json_decode($sourceOrder->lines,true);
+                    $shape=fn($rows)=>array_map(fn($line)=>array_intersect_key($line,array_flip(['description','quantity','rate'])),$rows);
+                    abort_unless($shape($lines)===$shape($sourceLines),422,'Linked order lines cannot change; account mappings and invoice tax can be reviewed separately.');
+                }
                 ApprovalFlow::ensureEditable($company,'invoice',$old->id);
                 abort_unless($old->status === 'draft' && $old->version === (int) $v['version'], 409, 'Only the latest draft can be changed. Reopen it.');
                 abort_unless($old->request_key === $v['request_key'] && $old->kind === $v['kind'], 422, 'Invoice identity cannot change.');

@@ -59,15 +59,34 @@ class ProductCatalogueTest extends TestCase
 
     public function test_guest_catalogue_does_not_expose_company_directory(): void
     {
-        $this->get('/products')->assertOk()->assertViewHas('portal', function ($portal) {
-            foreach ($portal['catalogueGroups'] as $group) {
-                if ($group['companies']) {
-                    return false;
-                }
-            }
+        foreach (ProductCatalogue::THEMES as $theme) {
+            DB::table('site_content')->updateOrInsert(['key'=>'products_theme'], ['value'=>json_encode($theme)]);
+            $this->get('/products')->assertRedirect('/login')->assertSessionHas('url.intended', '/products');
+            $this->get('/')->assertOk()->assertViewHas('portal', fn ($portal) => count($portal['products']) > 0 && $portal['catalogueGroups'] === [] && $portal['workspaceCompanies'] === []);
+        }
+    }
 
-            return true;
-        });
+    public function test_employee_returns_to_catalogue_after_login_with_only_assigned_products(): void
+    {
+        $user=User::factory()->create(['is_active'=>true,'password'=>\Illuminate\Support\Facades\Hash::make('catalogue-test-password')]);
+        UserProductAccess::sync($user,['product_slugs'=>['focus-to-do'],'company_ids'=>[]]);
+        $this->get('/products?search=focus')->assertRedirect('/login');
+        $this->post('/login',['email'=>$user->email,'password'=>'catalogue-test-password'])->assertRedirect('/products?search=focus');
+        $this->get('/products')->assertOk()->assertViewHas('portal',fn($p)=>array_column($p['products'],'slug')===['focus-to-do'] && $p['catalogueGroups']===[]);
+    }
+
+    public function test_super_admin_returns_to_catalogue_after_session_regeneration(): void
+    {
+        config(['judibas.admin_email'=>'catalogue-admin@example.test','judibas.admin_password_hash'=>\Illuminate\Support\Facades\Hash::make('catalogue-test-password')]);
+        $this->get('/products')->assertRedirect('/login');
+        $this->post('/login',['email'=>'catalogue-admin@example.test','password'=>'catalogue-test-password'])->assertRedirect('/products')->assertSessionHas('judibas_admin',true);
+        $this->get('/products')->assertOk();
+    }
+
+    public function test_inactive_users_cannot_open_the_catalogue(): void
+    {
+        $user=User::factory()->create(['is_active'=>false]);
+        $this->actingAs($user)->get('/products')->assertForbidden();
     }
 
     public function test_pms_card_only_lists_assigned_companies_and_hides_unassigned_products(): void
