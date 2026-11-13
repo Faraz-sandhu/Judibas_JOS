@@ -1,9 +1,10 @@
 // Generated sound only: no external audio or tracking requests.
 let context:AudioContext|undefined,source:AudioBufferSourceNode|undefined,tick:number|undefined;
 const ctx=()=>context||=(new AudioContext());
+export function unlockAudio(){try{const c=ctx();void c.resume().catch(()=>{});}catch{/* Audio is optional on unsupported browsers. */}}
 export function stopNoise(){source?.stop();source=undefined;window.clearInterval(tick);tick=undefined;}
 export function alarm(volume:number,kind='bell'){
- if(kind==='none')return;const c=ctx();void c.resume();
+ if(kind==='none'||volume<=0)return;let c:AudioContext;try{c=ctx();void c.resume().catch(()=>{});}catch{return;}
  [0,.25,.5].forEach((delay,i)=>{const osc=c.createOscillator(),gain=c.createGain();osc.type=kind==='digital'?'square':'sine';osc.frequency.value=(kind==='chime'?660:880)+i*110;gain.gain.setValueAtTime(volume/100*.15,c.currentTime+delay);gain.gain.exponentialRampToValueAtTime(.001,c.currentTime+delay+.25);osc.connect(gain).connect(c.destination);osc.start(c.currentTime+delay);osc.stop(c.currentTime+delay+.26);});
 }
 export function noise(kind:string,volume:number){
