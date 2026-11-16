@@ -1,0 +1,221 @@
+/* PMS inherits the same neutral surfaces as the other Judibas products.
+   Keep these overrides inside the workspace: legacy Bootstrap must not restyle the portal. */
+.pms-workspace,
+.pms-workspace.pms-dark {
+  --pms-primary: #7665ed;
+  --pms-primary-soft: color-mix(in srgb, var(--pms-primary) 12%, transparent);
+  --pms-surface: var(--rail);
+  --pms-page: var(--bg);
+  --pms-border: var(--line);
+  --pms-text: var(--text);
+  --pms-muted: var(--muted);
+  --pms-shadow: 0 2px 8px #00000004;
+  --pms-shadow-hover: 0 5px 18px #0000000b;
+  --bs-primary: var(--pms-primary);
+  --bs-primary-rgb: 118, 101, 237;
+  --bs-body-bg: var(--bg);
+  --bs-body-color: var(--text);
+  --bs-heading-color: var(--text);
+  --bs-border-color: var(--line);
+  --bs-secondary-color: var(--muted);
+  --bs-secondary-bg: var(--rail);
+  --bs-tertiary-bg: var(--hover);
+  --bs-light: var(--rail);
+  --bs-table-color: var(--text);
+  --bs-table-bg: transparent;
+  --bs-table-border-color: var(--line);
+  --bs-link-color: var(--pms-primary);
+  --bs-link-hover-color: var(--pms-primary);
+  font-family: Inter, Arial, sans-serif;
+  letter-spacing: normal;
+}
+
+.pms-workspace .pms-sidebar {
+  background: var(--bg);
+  border-color: var(--line);
+}
+.pms-workspace .pms-brand { color: var(--text); font-size: 18px; }
+.pms-workspace .pms-brand > span { background: var(--pms-primary); }
+.pms-workspace .pms-topbar {
+  background: var(--rail);
+  border-color: var(--line);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+.pms-workspace .admin-tabs button.active {
+  background: var(--pms-primary-soft);
+  color: var(--pms-primary);
+}
+.pms-workspace :is(.card, .pms-table-card, .admin-editor, .admin-list) {
+  background: var(--rail);
+  border-color: var(--line);
+  box-shadow: none;
+}
+.pms-workspace .dashboard-heading {
+  background: var(--rail);
+  border: 1px solid var(--line);
+  box-shadow: none;
+}
+.pms-workspace .dashboard-heading::before,
+.pms-workspace .dashboard-heading::after,
+.pms-workspace .pms-dashboard-stat::before,
+.pms-workspace .pms-dashboard-stat::after { display: none; }
+.pms-workspace .pms-dashboard-stats .pms-dashboard-stat {
+  border: 1px solid var(--line) !important;
+  text-align: left !important;
+  min-height: 144px;
+}
+.pms-workspace .pms-dashboard-stat .card-icon,
+.pms-workspace .dashboard-chart-icon {
+  background: var(--pms-primary-soft);
+  border-radius: 10px;
+}
+.pms-workspace .dashboard-actions .button:not(.primary) {
+  background: var(--bg);
+  border-color: var(--line);
+  color: var(--text);
+}
+.pms-workspace :is(.dashboard-chart-kicker, .dashboard-eyebrow) { color: var(--pms-primary); }
+.pms-workspace .pms-table th {
+  background: var(--hover);
+  color: var(--muted);
+}
+.pms-workspace .pms-table td { color: var(--text); }
+.pms-workspace :is(.pms-project-image, .pms-status-badge, .pms-time-panel) {
+  background: var(--pms-primary-soft);
+  color: var(--pms-primary);
+}
+.pms-workspace .button,
+.pms-workspace.pms-dark .button {
+  background: var(--bg);
+  border-color: var(--line);
+  color: var(--text);
+  border-radius: 8px;
+  box-shadow: none;
+}
+.pms-workspace :is(.button.primary, .btn-primary),
+.pms-workspace.pms-dark :is(.button.primary, .btn-primary) {
+  --bs-btn-bg: var(--pms-primary);
+  --bs-btn-border-color: var(--pms-primary);
+  --bs-btn-hover-bg: color-mix(in srgb, var(--pms-primary) 90%, black);
+  --bs-btn-active-bg: var(--bs-btn-hover-bg);
+  background: var(--pms-primary);
+  border-color: var(--pms-primary);
+  color: #fff;
+  box-shadow: none;
+}
+.pms-workspace .btn-label-primary,
+.pms-workspace .bg-label-primary {
+  background: var(--pms-primary-soft) !important;
+  color: var(--pms-primary) !important;
+}
+.pms-workspace .text-primary { color: var(--pms-primary) !important; }
+.pms-workspace :is(input:not([type=checkbox]):not([type=radio]):not([type=range]), select, textarea),
+.pms-workspace.pms-dark :is(input:not([type=checkbox]):not([type=radio]):not([type=range]), select, textarea) {
+  background-color: var(--bg);
+  border-color: var(--line);
+  color: var(--text);
+}
+.pms-workspace input::placeholder,
+.pms-workspace textarea::placeholder { color: var(--muted); opacity: 1; }
+.pms-workspace input[type=checkbox],
+.pms-workspace input[type=radio] { accent-color: var(--pms-primary); }
+.pms-workspace :is(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--pms-primary);
+  outline-offset: 2px;
+}
+.pms-workspace :is(.pms-source-dialog, .pms-task-modal, .modal-content) {
+  background: var(--bg);
+  color: var(--text);
+  border-color: var(--line);
+}
+.pms-workspace :is(.pms-task-comments, .pms-task-comments header, .pms-comment-list article p) {
+  background: var(--rail);
+  color: var(--text);
+  border-color: var(--line);
+}
+.pms-workspace :is(.jira-shell, .work-shell, .pms-board),
+.pms-workspace.pms-dark :is(.jira-shell, .work-shell, .pms-board) {
+  background: var(--bg) !important;
+}
+.pms-workspace :is(.jira-column, .work-column, .pms-board > section),
+.pms-workspace.pms-dark :is(.jira-column, .work-column, .pms-board > section) {
+  background: var(--rail) !important;
+  border-color: var(--line);
+}
+.pms-workspace :is(.jira-card, .work-card, .pms-board article),
+.pms-workspace.pms-dark :is(.jira-card, .work-card, .pms-board article) {
+  background: var(--bg) !important;
+  color: var(--text) !important;
+  border-color: var(--line) !important;
+  box-shadow: 0 1px 3px #00000008;
+}
+.pms-workspace :is(.jira-card-title, .work-title, .pms-board article > button) {
+  color: var(--text);
+}
+
+/* Use the same heading + contained sidebar layout as Accounting and Daymark. */
+.pms-workspace {
+  max-width: 1560px !important;
+  margin: 0 auto;
+  padding: 36px 40px 60px !important;
+  grid-template-columns: 216px minmax(0, 1fr);
+  column-gap: 32px;
+  align-items: start;
+  align-content: start;
+}
+.pms-workspace .pms-product-heading {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 24px;
+  margin-bottom: 28px;
+  border-bottom: 1px solid var(--line);
+}
+.pms-workspace .pms-product-eyebrow { font-size: 10px; letter-spacing: .12em; color: var(--pms-primary); }
+.pms-workspace .pms-product-title h1 { margin: 8px 0; font-size: 28px; font-weight: 650; letter-spacing: -.7px; }
+.pms-workspace .pms-product-title p { margin: 0; font-size: 13px; color: var(--muted); }
+.pms-workspace .pms-heading-actions { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.pms-workspace .pms-company-context { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: 290px; font-size: 12px; }
+.pms-workspace .pms-company-context strong { color: var(--text); overflow-wrap: anywhere; }
+.pms-workspace .pms-company-context a { color: var(--pms-primary); font-size: 11px; }
+.pms-workspace .pms-navbar-spacer { display: none; }
+.pms-workspace .pms-page { padding: 0; min-width: 0; }
+.pms-workspace .pms-brand { display: none; }
+.pms-workspace .pms-sidebar {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--rail);
+  padding: 16px 12px 0;
+}
+.pms-workspace .menu-header { padding: 8px 12px; font-size: 10px !important; }
+.pms-workspace .admin-tabs button { font-size: 13px; padding: 11px 12px; border-radius: 8px; }
+.pms-workspace .admin-tabs .ti { font-size: 18px; }
+.pms-workspace .pms-client-workspace > summary .pms-tree-label { white-space: normal; text-overflow: clip; overflow-wrap: anywhere; font-size: 12px; }
+.pms-workspace .pms-products-link { font-size: 12px; margin: 22px 12px 18px; }
+.pms-workspace .pms-source-backdrop { background: #0008; }
+.pms-workspace .btn-secondary { background: var(--bg); border-color: var(--line); color: var(--text); box-shadow: none; }
+
+/* Long sprint names must stay inside narrow kanban cards. */
+.pms-workspace .pms-work-sprint-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 8px; margin-bottom: 8px; min-width: 0; }
+.pms-workspace .pms-work-sprint-name { max-width: 100%; min-width: 0; white-space: normal; overflow-wrap: anywhere; text-align: left; line-height: 1.45; }
+.pms-workspace .pms-work-sprint-row > .work-meta { flex-shrink: 0; font-size: 11px; }
+.pms-workspace :is(.work-card, .jira-card) { min-width: 0; }
+.pms-workspace :is(.work-card, .jira-card) .badge { max-width: 100%; }
+.pms-workspace .jira-card .badge { white-space: normal; overflow-wrap: anywhere; text-align: left; line-height: 1.4; }
+@media (min-width: 901px) {
+  .pms-workspace .pms-sidebar { position: sticky; top: 65px; height: auto; max-height: calc(100dvh - 85px); }
+  .pms-workspace .pms-menu-scroll { min-height: 0; }
+}
+@media (max-width: 1150px) {
+  .pms-workspace { padding: 28px 24px 50px !important; grid-template-columns: 190px minmax(0, 1fr); column-gap: 22px; }
+}
+@media (max-width: 900px) {
+  .pms-workspace { display: block; padding: 24px 16px 40px !important; }
+  .pms-workspace .pms-product-heading { flex-wrap: wrap; align-items: flex-start; gap: 18px; }
+  .pms-workspace .pms-heading-actions { flex-wrap: wrap; gap: 12px; }
+  .pms-workspace .pms-sidebar { border-radius: 0; }
+  .pms-workspace .pms-sidebar .pms-brand { display: flex; }
+}

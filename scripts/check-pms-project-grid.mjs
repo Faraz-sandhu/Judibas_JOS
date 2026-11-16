@@ -6,7 +6,7 @@ import {mkdir} from 'node:fs/promises';
 const origin=process.env.PMS_TEST_URL||'http://127.0.0.1:8000';
 const browser=await chromium.launch({channel:'msedge',headless:true});
 try{
- const context=await browser.newContext({serviceWorkers:'block',viewport:{width:1440,height:1000}});
+ const context=await browser.newContext({serviceWorkers:'block',reducedMotion:'reduce',viewport:{width:1440,height:1000}});
  const page=await context.newPage(),errors=[];
  page.on('pageerror',error=>errors.push(error.message));
  const client={id:21,name:'Atlas Logistics'};
