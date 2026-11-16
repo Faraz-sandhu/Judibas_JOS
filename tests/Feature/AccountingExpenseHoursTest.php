@@ -60,19 +60,14 @@ class AccountingExpenseHoursTest extends TestCase
   $this->assertSame(0,\Illuminate\Support\Facades\DB::table('accounting_journals')->where('company_id',$company)->count());
  }
 
- public function test_global_policy_applies_to_existing_and_future_companies_and_rejects_stale_settings():void {
+ public function test_company_settings_preserve_other_and_future_companies_and_reject_stale_edits():void {
   $this->withSession(['judibas_admin'=>true]);
-  $create=function($name){$id=\Illuminate\Support\Facades\DB::table('communication_companies')->insertGetId(['name'=>$name,'created_at'=>now(),'updated_at'=>now()]);$this->postJson('/accounting/api/books',['company_id'=>$id,'version'=>0,'currency'=>'PKR','start_date'=>now()->toDateString()])->assertOk();return $id;};
-  $a=$create('Global A');$b=$create('Global B');
+  $create=function($name){$id=\Illuminate\Support\Facades\DB::table('communication_companies')->insertGetId(['name'=>$name]);$this->postJson('/accounting/api/books',['company_id'=>$id,'version'=>0,'currency'=>'PKR','start_date'=>now()->toDateString()])->assertOk();return $id;};
+  $a=$create('Policy A');$b=$create('Policy B');$before=\Illuminate\Support\Facades\DB::table('accounting_books')->where('company_id',$b)->first();
   $this->postJson('/accounting/api/books',['company_id'=>$a,'version'=>1,'currency'=>'PKR','start_date'=>now()->toDateString(),'approval_required'=>true,'approval_types'=>['general'],'expense_open_time'=>'10:00','expense_close_time'=>'17:05'])->assertOk();
-  $c=$create('Global new company');
-  foreach([$a,$b,$c] as $id){
-   $this->getJson('/accounting/api/data?company_id='.$id)->assertOk()->assertJsonPath('book.approval_types',['general'])->assertJsonPath('book.expense_close_time','17:05');
-   $this->assertFalse(\App\Modules\Accounting\Services\ApprovalPolicy::required($id,'cash_payment'));
-   $this->assertTrue(\App\Modules\Accounting\Services\ApprovalPolicy::required($id,'general'));
-  }
-  $this->postJson('/accounting/api/books',['company_id'=>$b,'version'=>1,'currency'=>'PKR','start_date'=>now()->toDateString(),'approval_types'=>[]])->assertConflict();
-  $this->assertSame('PKR',\Illuminate\Support\Facades\DB::table('accounting_books')->where('company_id',$b)->value('currency'));
+  $after=\Illuminate\Support\Facades\DB::table('accounting_books')->where('company_id',$b)->first();$this->assertEquals($before,$after);
+  $c=$create('Policy C');$this->assertSame($before->expense_close_time,\App\Modules\Accounting\Services\Ledger::book($c)->expense_close_time);
+  $this->getJson('/accounting/api/data?company_id='.$a)->assertOk()->assertJsonPath('book.approval_types',['general'])->assertJsonPath('book.expense_close_time','17:05');
+  $this->postJson('/accounting/api/books',['company_id'=>$a,'version'=>1,'currency'=>'PKR','start_date'=>now()->toDateString()])->assertConflict();
  }
-
 }

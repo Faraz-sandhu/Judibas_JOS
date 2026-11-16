@@ -11,7 +11,7 @@ class ApprovalFlow
     public const STAGES = ['paper_ceo'=>'Awaiting CEO-signed copy','finance_review'=>'Finance review','ceo_review'=>'CEO approval','finance_verify'=>'Finance verification','manager_review'=>'Finance Manager posting','posted'=>'Posted','returned'=>'Returned to preparer','withdrawn'=>'Withdrawn'];
     public const PERMISSIONS = ['paper_ceo'=>'workflow.upload_signed','finance_review'=>'workflow.finance_review','ceo_review'=>'workflow.ceo_approve','finance_verify'=>'workflow.finance_verify','manager_review'=>'workflow.finalize'];
 
-    public static function enabled(int $company,?string $type=null,?int $id=null): bool { return $type!==null&&$id!==null?ApprovalPolicy::required($company,ApprovalPolicy::documentKey($company,$type,$id)):(bool)GlobalPolicy::get()->approval_required; }
+    public static function enabled(int $company,?string $type=null,?int $id=null): bool { return $type!==null&&$id!==null?ApprovalPolicy::required($company,ApprovalPolicy::documentKey($company,$type,$id)):(bool)(DB::table('accounting_books')->where('company_id',$company)->value('approval_required')??false); }
     public static function approval(int $company,string $type,int $id): ?object { return DB::table('accounting_approvals')->where('company_id',$company)->where('document_type',$type)->where('document_id',$id)->first(); }
     public static function ensureEditable(int $company,string $type,int $id): void
     {

@@ -14,9 +14,10 @@ class BooksController
         $company = (int) $v['company_id'];
         Access::company($r, $company, 'books.manage');
         DB::transaction(function () use ($r, $v, $company) {
-            $global=\App\Modules\Accounting\Services\GlobalPolicy::get(true);
+            $defaults=\App\Modules\Accounting\Services\GlobalPolicy::get();
             Ledger::lock($company);
             $old = DB::table('accounting_books')->where('company_id', $company)->first();
+            $global=$old??$defaults;
             abort_unless(($old->version ?? 0) === (int) $v['version'], 409, 'Books settings changed. Refresh before saving.');
             $open=$v['expense_open_time']??$global->expense_open_time??'11:00';
             $close=$v['expense_close_time']??$global->expense_close_time??'20:00';
@@ -32,18 +33,15 @@ class BooksController
             if((bool)($global->approval_required??true)!==$enabled||$before!==$normal)Permissions::require($r,'workflow.configure');
             $changed=(bool)$global->approval_required!==$enabled||$before!==$normal||$open!==$global->expense_open_time||$close!==$global->expense_close_time;
             if($changed){
-                abort_unless(\App\Services\PlatformAccess::super($r),403,'Only Super Admin can change global Accounting approval and voucher hours settings.');
-                $policy=['approval_required'=>$enabled,'approval_types'=>json_encode(array_values($types)),'expense_open_time'=>$open,'expense_close_time'=>$close,'updated_at'=>now()];
-                DB::table('accounting_global_policy')->where('id',1)->update($policy);
-                DB::table('accounting_books')->where('company_id','<>',$company)->update($policy+['version'=>DB::raw('version + 1')]);
-                Access::audit($r,$company,'Global Accounting policy saved','All companies',['previous'=>$global,'current'=>$policy]);
+                abort_unless(\App\Services\PlatformAccess::super($r),403,'Only Super Admin can change this company’s Accounting approval and voucher hours settings.');
+                Access::audit($r,$company,'Company Accounting policy saved','Company books',['previous'=>$old]);
             }
             $values = ['expense_open_time'=>$open,'expense_close_time'=>$close,'approval_types'=>json_encode(array_values($types)), 'approval_required' => $enabled, 'currency' => $v['currency'], 'start_date' => $v['start_date'], 'locked_through' => $v['locked_through'] ?? null, 'version' => ($old->version ?? 0) + 1, 'updated_at' => now()];
             DB::table('accounting_books')->updateOrInsert(['company_id' => $company], $values + ($old ? [] : ['created_at' => now()]));
             Access::audit($r, $company, 'Books settings saved', 'Company books', ['previous' => $old, 'current' => $values]);
         });
 
-        return ['message' => 'Settings saved. Approval workflow and expense voucher hours apply to all companies.'];
+        return ['message' => 'Settings saved for this company only.'];
     }
 
     public function audit(Request $r)

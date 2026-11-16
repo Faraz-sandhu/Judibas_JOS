@@ -104,7 +104,7 @@ class AccountingCurrencyTest extends TestCase
     {
         $i = $this->invoice();
         $this->payment($i, '100', '279', ['exchange_account_id' => $this->accounts['05-01-01']])->assertOk()->assertJsonPath('invoice.foreign_outstanding', '900.00');
-        DB::table('accounting_global_policy')->where('id', 1)->update(['approval_required' => true, 'approval_types' => json_encode(['customer_payment'])]);
+        DB::table('accounting_books')->where('company_id', $this->company)->update(['approval_required' => true, 'approval_types' => json_encode(['customer_payment'])]);
         $this->payment($i,'600','280',['exchange_account_id' => null])->assertOk();
         $this->payment($i,'400','280',['exchange_account_id' => null])->assertStatus(422);
         $this->assertSame(1,DB::table('accounting_payment_requests')->where('company_id',$this->company)->count());

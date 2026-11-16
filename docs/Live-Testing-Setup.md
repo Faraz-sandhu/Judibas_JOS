@@ -1,0 +1,12 @@
+# Live testing setup
+
+Run `php artisan judibas:prepare-testing` to preview, then `php artisan judibas:prepare-testing --apply` after backing up the database. No general `db:seed` command is needed. The command is opt-in and is not called by migrations.
+
+- Creates the 20 canonical company names from the approved directory. Renames an existing Judibas/Judibass in place to Judibas GOC if needed. Empty remaining aliases are consolidated; aliases with business records are preserved with a warning for a reviewed merge. No accounting history is deleted.
+- Creates eight named test users under `example.test`. Their password is the testing password requested by the owner; change/disable these accounts when testing finishes. Existing accounts are skipped, including their passwords and assignments.
+- Accounting built-in role presets are created only if missing. Existing/custom permission settings remain intact. No local custom role database is copied to production. PMS starter roles and permissions are populated only if its role table is empty. Canteen and Daymark use their existing product-specific role systems. CV Bank editor permissions remain managed in its Settings; this does not grant every HR user unrestricted career publishing.
+- Finance and finance-manager/HR testing accounts have all listed company memberships. The CEO testing account is limited to Skyinfinit. The PM and employee share Skyinfinit and have a Daymark manager assignment. Kitchen/cashier accounts receive only Communication and Canteen access. Employees are not granted company-administrator access.
+- Skyinfinit receives two benefit levels and three clearly marked testing menu items with opening stock. No real orders or payments are generated. Existing prices, stock and policies are not reset. Other companies do not receive cross-company benefit-level IDs.
+- Accounting approval settings and expense hours now persist on the selected company's books. There is no cross-company update or runtime global override. Existing stored values are preserved; change them per company in Company books. Super Admin configuration restrictions remain in place.
+
+Testing accounts: `judibas.test.finance@example.test`, `judibas.test.finance-manager@example.test`, `judibas.test.ceo@example.test`, `judibas.test.project-manager@example.test`, `judibas.test.hr@example.test`, `judibas.test.employee@example.test`, `judibas.test.kitchen@example.test`, `judibas.test.cashier@example.test`.
