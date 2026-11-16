@@ -25,7 +25,7 @@ class PlatformInvitationController extends Controller
   if($v['delivery_method']==='email') {
    if(!\App\Models\MailSetting::current()->invitation_emails_enabled){$status='email_disabled';$message='Invitation created. Email invitations are disabled; share the link.';}
    elseif(in_array(config('mail.default'),['array','log'])){$status='not_configured';$message='Invitation created. Configure shared email settings or share the link.';}
-   else try {Mail::raw("You have been invited to Judibas. Accept your assigned product access: ".$url."\nThis link expires in seven days. Existing users sign in with their current account.",fn($m)=>$m->to($v['email'])->subject('Your Judibas invitation'));$status='sent';$message='Invitation email sent.';}catch(\Throwable $e){report($e);$status='failed';$message='Invitation created, but email delivery failed. Share the link or check shared email settings.';}
+   else try {Mail::send('emails.platform-invitation',['acceptanceUrl'=>$url,'inviteeName'=>$v['name']??null,'productNames'=>collect(config('judibas.products'))->whereIn('slug',$v['product_slugs'])->pluck('name')->all()],fn($m)=>$m->to($v['email'])->subject('Your Judibas invitation'));$status='sent';$message='Invitation email sent.';}catch(\Throwable $e){report($e);$status='failed';$message='Invitation created, but email delivery failed. Share the link or check shared email settings.';}
   }
   DB::table('platform_invitations')->where('id',$id)->update(['delivery_status'=>$status]);
   return response()->json(['message'=>$message,'invitation_url'=>$url,'delivery_status'=>$status],201);

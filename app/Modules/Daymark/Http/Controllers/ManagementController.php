@@ -131,7 +131,7 @@ class ManagementController
         $sent = false;
         if ($v['delivery_method'] === 'email' && MailSetting::current()->invitation_emails_enabled && ! in_array(config('mail.default'), ['log', 'array'])) {
             try {
-                Mail::raw('You are invited to Daymark in Judibas. Accept your invitation: '.$url.' (valid for seven days).', fn ($m) => $m->to($v['email'])->subject('Your Judibas Daymark invitation'));
+                Mail::send('emails.platform-invitation', ['acceptanceUrl' => $url, 'inviteeName' => $v['name'], 'productNames' => ['Daymark']], fn ($m) => $m->to($v['email'])->subject('Your Judibas Daymark invitation'));
                 $sent = true;
             } catch (\Throwable $e) {
                 report($e);
