@@ -17,7 +17,11 @@
                     <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
                         <tr>
                             <td>
+                                @if(isset($branding))
                                 <img src="{{ $branding->assetUrl('login_logo', 'assets/img/logo.png') }}" alt="{{ config('app.name') }}" style="display:block;max-width:180px;max-height:52px;width:auto;height:auto;">
+                                @else
+                                <strong style="font-size:24px;letter-spacing:-0.5px;color:#6554dc;">{{ config('app.name', 'Judibas') }}</strong>
+                                @endif
                             </td>
                             <td align="right" style="font-size:11px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:#7465eb;">{{ $eyebrow }}</td>
                         </tr>
