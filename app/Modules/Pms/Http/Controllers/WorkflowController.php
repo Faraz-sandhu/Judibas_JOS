@@ -38,7 +38,7 @@ class WorkflowController extends Controller
     public function update(Request $request, Workflow $workflow)
     {
         PmsAccess::requirePermission(request(), 'department-edit');
-        $validated = $this->validateWorkflow($request);
+        $validated = $this->validateWorkflow($request, $workflow);
         DB::transaction(fn () => $this->persist($workflow, $validated));
 
         return response()->json(['message'=>'Workflow updated successfully.']);
@@ -47,13 +47,13 @@ class WorkflowController extends Controller
     public function destroy(Workflow $workflow)
     {
         PmsAccess::requirePermission(request(), 'department-trash');
-        abort_if($workflow->tasks()->exists(), 422, 'A workflow in use cannot be deleted.');
+        abort_if($workflow->tasks()->withoutGlobalScopes()->exists(), 422, 'A workflow in use cannot be deleted.');
         $workflow->delete();
 
         return response()->json(['message'=>'Workflow deleted successfully.']);
     }
 
-    private function validateWorkflow(Request $request): array
+    private function validateWorkflow(Request $request, ?Workflow $workflow = null): array
     {
         return $request->validate([
             'name' => ['required', 'string', 'max:255'],
@@ -61,12 +61,12 @@ class WorkflowController extends Controller
             'description' => ['nullable', 'string', 'max:2000'],
             'is_active' => ['nullable', 'boolean'],
             'transition_mode' => ['required', Rule::in(['any', 'adjacent'])],
-            'columns' => ['required', 'array', 'min:2', 'max:20'],
-            'columns.*.id' => ['nullable', 'integer', 'exists:pms_workflow_columns,id'],
+            'columns' => ['required', 'array', 'list', 'min:2', 'max:20'],
+            'columns.*.id' => ['nullable', 'integer', 'distinct', Rule::exists('pms_workflow_columns', 'id')->where('workflow_id', $workflow?->id ?? 0)],
             'columns.*.name' => ['required', 'string', 'max:100'],
             'columns.*.color' => ['required', Rule::in(['secondary', 'primary', 'info', 'warning', 'danger', 'success'])],
-            'initial_column' => ['required', 'integer', 'min:0'],
-            'completed_column' => ['required', 'integer', 'min:0'],
+            'initial_column' => ['required', 'integer', 'min:0', 'max:'.max(0, count((array) $request->input('columns', [])) - 1)],
+            'completed_column' => ['required', 'integer', 'min:0', 'max:'.max(0, count((array) $request->input('columns', [])) - 1), 'different:initial_column'],
         ]);
     }
 
@@ -94,7 +94,7 @@ class WorkflowController extends Controller
             $keptIds[] = $record->id;
         }
         $removed = $workflow->columns()->whereNotIn('id', $keptIds);
-        abort_if((clone $removed)->whereHas('pms_tasks')->exists(), 422, 'Move tasks out of a column before removing it.');
+        abort_if((clone $removed)->whereHas('tasks', fn ($tasks) => $tasks->withoutGlobalScopes())->exists(), 422, 'Move tasks out of a column before removing it.');
         $removed->delete();
     }
 }
