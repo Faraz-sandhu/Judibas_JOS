@@ -9,6 +9,38 @@ class ProductCatalogue
 {
     public const THEMES = ['workspace', 'directory', 'classic', 'disclosure'];
 
+    /** Grouped products use the same company lists as the product page. */
+    public static function invitationCompanyScopes(): array
+    {
+        $companies = DB::table('communication_companies')->get(['id', 'name']);
+        $scopes = [];
+        foreach (collect(config('product-catalogue.groups', []))->groupBy('slug') as $slug => $groups) {
+            $names = $groups->flatMap(fn ($group) => $group['companies'])->map(fn ($name) => mb_strtolower($name))->all();
+            $scopes[$slug] = $companies->filter(fn ($company) => in_array(mb_strtolower($company->name), $names, true))
+                ->pluck('id')->map(fn ($id) => (int) $id)->values()->all();
+        }
+
+        return $scopes;
+    }
+
+    public static function validateInvitationCompanies(array $access): void
+    {
+        $scopes = self::invitationCompanyScopes();
+        $allowed = [];
+        foreach ($access['product_slugs'] as $slug) {
+            // Universal products have no company-specific catalogue group.
+            if (! array_key_exists($slug, $scopes)) {
+                return;
+            }
+            $allowed = array_merge($allowed, $scopes[$slug]);
+        }
+        if (array_diff($access['company_ids'], $allowed)) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'company_ids' => 'Choose companies belonging to the selected products on the Products page.',
+            ]);
+        }
+    }
+
     public static function theme(): string
     {
         $theme = json_decode(DB::table('site_content')->where('key', 'products_theme')->value('value') ?? 'null', true);

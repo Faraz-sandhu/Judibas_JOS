@@ -17,6 +17,7 @@ class PlatformInvitationController extends Controller
   $v=$r->validate(UserProductAccess::rules()+['name'=>'nullable|string|max:100','email'=>'required|email|max:200','delivery_method'=>'required|in:manual,email']);
   abort_if($v['email']===strtolower(config('judibas.admin_email')),422,'This email is reserved for Super Admin.');
   $existing=User::where('email',$v['email'])->first();\App\Services\PlatformAccess::protectAccount($r,$existing?->id);
+  \App\Services\ProductCatalogue::validateInvitationCompanies($v);
   UserProductAccess::validateSelection($v);
   if(in_array('projects',$v['product_slugs'])&&!count($v['pms_role_ids']??[]))throw \Illuminate\Validation\ValidationException::withMessages(['pms_role_ids'=>'Select a PMS role.']);
   $access=collect($v)->only(array_keys(UserProductAccess::rules()))->all();$token=Str::random(64);
