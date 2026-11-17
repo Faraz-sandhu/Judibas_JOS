@@ -1005,3 +1005,10 @@
 .pms-project-grid-empty>h3{font-size:17px;margin:15px 0 10px;color:var(--pms-text)}
 .pms-project-grid-empty>p{font-size:13px;margin:0}
 @media(max-width:550px){.pms-project-department-panel{padding:18px}.pms-project-department-panel .pms-department-tiles{grid-template-columns:1fr}.pms-project-department-heading h3{font-size:19px}.pms-project-department-heading>div{flex-basis:100%}}
+
+/* Client project display preference. */
+.pms-workspace .pms-project-heading-actions{display:flex;align-items:center;flex-wrap:wrap;gap:12px}
+.pms-workspace .pms-project-view-toggle{display:inline-flex;gap:3px;padding:4px;border:1px solid var(--pms-border);border-radius:9px;background:var(--pms-surface)}
+.pms-workspace .pms-project-view-toggle button{display:flex;align-items:center;gap:6px;border:0;border-radius:6px;padding:7px 11px;background:transparent;color:var(--pms-muted);font:inherit;font-size:12px;cursor:pointer}
+.pms-workspace .pms-project-view-toggle button.active{background:var(--pms-primary-soft);color:var(--pms-primary);font-weight:600}
+.pms-workspace .pms-project-view-toggle button:focus-visible{outline:2px solid var(--pms-primary);outline-offset:2px}
