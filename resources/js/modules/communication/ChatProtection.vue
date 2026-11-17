@@ -63,7 +63,7 @@ defineExpose({prepare,sync,sent,openUnlock});
   <button v-if="!admin&&userId" type="button" :disabled="busy||requested" @click="requestAccess">{{requested?'Access request sent':'Request access again'}}</button>
  </template>
  <small v-if="error&&!show" role="alert">{{error}}</small>
- <Teleport to="body"><div v-if="show&&config&&!review" class="protection-overlay" @click.self="closeDialog"><section class="protection-dialog" role="dialog" aria-modal="true" aria-labelledby="protection-dialog-title" @keydown="dialogKeys">
+ <Teleport to="body"><Transition name="product-dialog"><div v-if="show&&config&&!review" class="protection-overlay" @click.self="closeDialog"><section class="protection-dialog" role="dialog" aria-modal="true" aria-labelledby="protection-dialog-title" @keydown="dialogKeys">
   <header><span class="protection-dialog-icon" aria-hidden="true"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 4v3"/></svg></span><button ref="dialogClose" type="button" class="protection-close" aria-label="Close access key dialog" :disabled="busy" @click="closeDialog">&times;</button></header>
   <template v-if="dialogMode==='reset'">
    <h3 id="protection-dialog-title">Create a new key for future messages</h3>
@@ -94,7 +94,7 @@ defineExpose({prepare,sync,sent,openUnlock});
    </form><button v-if="admin&&!generated&&!historical" type="button" @click="openReset">I do not have either key</button>
   </template>
   <small v-if="error" class="protection-error" role="alert">{{error}}</small>
- </section></div></Teleport>
+ </section></div></Transition></Teleport>
 </div>
 </template>
 <style scoped>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import {useProductMotion} from '../../components/useProductMotion';
+useProductMotion('.pms-workspace');
 import {workspaceCompany,replaceCompanyWorkspace} from '../../companyWorkspace';
 import {pmsFetch, pmsLoading, withoutPmsLoader} from './loading';
 import PmsSelectMenu from './PmsSelectMenu.vue';

@@ -1,0 +1,10 @@
+.product-dialog-enter-active,.product-dialog-leave-active{transition:opacity .18s ease}
+.product-dialog-enter-active :is(.pms-source-dialog,.comm-modal,.protection-dialog),.product-dialog-leave-active :is(.pms-source-dialog,.comm-modal,.protection-dialog){transition:transform .22s cubic-bezier(.2,.75,.25,1),opacity .18s ease}
+.product-dialog-enter-from,.product-dialog-leave-to{opacity:0}
+.product-dialog-enter-from :is(.pms-source-dialog,.comm-modal,.protection-dialog),.product-dialog-leave-to :is(.pms-source-dialog,.comm-modal,.protection-dialog){transform:translateY(12px) scale(.98);opacity:0}
+.product-panel-enter-active,.product-panel-leave-active{transition:opacity .18s ease,transform .2s ease}
+.product-panel-enter-from,.product-panel-leave-to{opacity:0;transform:translateX(14px)}
+:is(.pms-workspace,.comm-workspace) :is(button,a,.work-card){transition:background-color .16s ease,border-color .16s ease,box-shadow .16s ease,color .16s ease}
+.pms-workspace :is(.work-column,.jira-column){transition:background-color .18s ease,box-shadow .18s ease}
+.pms-workspace .work-card.dragging{opacity:.45}
+@media (prefers-reduced-motion:reduce){.product-panel-enter-active,.product-panel-leave-active,.product-dialog-enter-active,.product-dialog-leave-active,.product-dialog-enter-active *,.product-dialog-leave-active *,:is(.pms-workspace,.comm-workspace) :is(button,a,.work-card,.work-column,.jira-column){transition:none!important;animation:none!important}}
