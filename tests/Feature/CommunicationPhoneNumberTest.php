@@ -13,8 +13,11 @@ class CommunicationPhoneNumberTest extends TestCase
   Event::fake();$a=$this->employee();$b=$this->employee(true);$chat=$this->actingAs($a)->postJson('/communication/api/conversations',['kind'=>'direct','member_ids'=>[$b->id]])->assertOk()->json('id');
   foreach(['03001234567','+92 300 123 4567','(212) 555-0123','+44 20 7946 0958','tel:5551234','wa.me/923001234567',"\u{0660}\u{0663}\u{0660}\u{0660}\u{0661}\u{0662}\u{0663}\u{0664}\u{0665}\u{0666}\u{0667}","0300\u{200B}1234567"]as $number){$this->postJson('/communication/api/conversations/'.$chat.'/messages',['body'=>'Contact '.$number])->assertUnprocessable()->assertJsonValidationErrors('body');}
   $id=$this->postJson('/communication/api/conversations/'.$chat.'/messages',['body'=>'Meeting on 2026-10-09, budget 1500, server 192.168.10.69'])->assertCreated()->json('id');
-  $this->patchJson('/communication/api/messages/'.$id,['body'=>'Call 03001234567'])->assertUnprocessable()->assertJsonValidationErrors('body');
+  $this->patchJson('/communication/api/messages/'.$id,['body'=>'Call 03001234567'])->assertForbidden();
   $this->actingAs($b)->postJson('/communication/api/conversations/'.$chat.'/messages',['body'=>'03001234567'])->assertUnprocessable();
+  $delegatedMessage=$this->postJson('/communication/api/conversations/'.$chat.'/messages',['body'=>'Original delegated admin message'])->assertCreated()->json('id');
+  $this->patchJson('/communication/api/messages/'.$delegatedMessage,['body'=>'Changed message'])->assertForbidden();
+  $this->assertDatabaseHas('communication_messages',['id'=>$delegatedMessage,'body'=>'Original delegated admin message','edited_at'=>null]);
   $old=DB::table('communication_messages')->insertGetId(['conversation_id'=>$chat,'sender_id'=>$a->id,'sender_name'=>$a->name,'body'=>'Legacy phone 03001234567','created_at'=>now(),'updated_at'=>now()]);
   $this->postJson('/communication/api/messages/'.$old.'/forward',['conversation_id'=>$chat])->assertUnprocessable()->assertJsonValidationErrors('body');
  }

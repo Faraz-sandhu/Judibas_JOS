@@ -62,6 +62,16 @@ try{
   await page.getByRole('button',{name:'Open navigation',exact:true}).click();await expect(page.locator('.pms-sidebar')).toBeVisible();await page.getByRole('button',{name:'Close navigation',exact:true}).last().click();await expect(page.locator('.pms-sidebar')).toBeHidden();await page.screenshot({path:'.preview/pms-judibas-mobile-'+theme+'.png'});
   await page.setViewportSize({width:1440,height:1000});
  }
+ for(const count of [0,1,2]){
+  await page.route('**/pms/api/my-work?*',route=>route.fulfill({json:{data:{projects:[],sprints:[],assignees:[],canManageTeam:false,canQuickAssign:false,tasks:[],statusCounts:{},workflows:Array.from({length:count},(_,i)=>({id:i+1,name:'Workflow '+(i+1)})),selectedWorkflow:count?{id:1,columns:[{id:1,name:'To do',color:'secondary'}]}:null}}}));
+  await page.goto('http://pms-preview.test/pms?section=my-work');
+  await expect(page.locator('.filter-card')).toBeVisible();
+  await expect(page.locator('#work-workflow')).toHaveCount(count>1?1:0);
+  if(count===0)await expect(page.getByRole('heading',{name:'No assigned work yet'})).toBeVisible();
+  if(count>1)await expect(page.locator('#work-workflow')).toHaveValue('1');
+  await expect(page.locator('.filter-card button')).toBeEnabled();
+  await page.unroute('**/pms/api/my-work?*');
+ }
  expect(errors).toEqual([]);await writeFile('.preview/pms-shared-theme-results.json',JSON.stringify({results,errors},null,2));
  console.log('PASS: light/dark surfaces, dashboard, client/workflow/department dialogs, reports, work logs, narrow board badges, mobile navigation/overflow and runtime checks. No database writes.');
 }finally{await browser.close();}

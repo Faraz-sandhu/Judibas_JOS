@@ -44,8 +44,13 @@ class MyWorkController extends Controller
         }
 
         $accessibleProjectIds = (clone $query)->reorder()->select('pms_tasks.project_id')->distinct()->pluck('project_id');
+        $query
+            ->when($validated['project'] ?? null, fn (Builder $q, $id) => $q->where('project_id', $id))
+            ->when($validated['sprint'] ?? null, fn (Builder $q, $id) => $q->where('sprint_id', $id));
+        $accessibleWorkflowIds = (clone $query)->reorder()->whereNotNull('pms_tasks.workflow_id')
+            ->select('pms_tasks.workflow_id')->distinct()->pluck('workflow_id');
         $workflows = Workflow::query()->where('is_active', true)
-            ->whereHas('projects', fn (Builder $projects) => $projects->whereIn('pms_projects.id', $accessibleProjectIds))
+            ->whereIn('pms_workflows.id', $accessibleWorkflowIds)
             ->with(['columns', 'department:id,dept_name'])->orderBy('name')->get();
         $selectedWorkflow = $workflows->firstWhere('id', (int) ($validated['workflow'] ?? 0)) ?? $workflows->first();
         if ($selectedWorkflow) {

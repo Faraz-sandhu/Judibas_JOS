@@ -314,12 +314,13 @@ class CommunicationController extends Controller
     public function updateMessage(Request $r, int $id)
     {
         $this->mutable($r);
+        abort_unless($this->isAdmin($r), 403, 'Message editing is disabled. Send a correction as a new reply instead.');
         $m = DB::table('communication_messages')->where('id', $id)->first();
         abort_unless($m, 404);
         $c = $this->conversation($r, $m->conversation_id);
         abort_if($m->protected_payload, 422, 'Protected messages cannot be edited. Send a new protected message instead.');
         abort_unless($c->kind !== 'community' || \App\Services\PlatformAccess::administrator($r), 403);
-        abort_unless(! $m->deleted_at && ($this->isAdmin($r) ? $m->sender_id === null && $m->sender_name === 'Super Admin' : $m->sender_id === Auth::id()), 403);
+        abort_unless(! $m->deleted_at && $m->sender_id === null && $m->sender_name === 'Super Admin', 403);
         $v = $r->validate(['body' => 'required|string|max:10000']);
         \App\Services\CommunicationMessagePolicy::enforce($r, $v['body']);
         abort_if(trim($v['body']) === '', 422);
