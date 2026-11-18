@@ -30,6 +30,7 @@ class AdminController extends Controller
             $u->pms_department_ids=$pms->departments->pluck('id');
             $u->designation=$pms->designation; $u->surname=$pms->surname;
             $u->product_slugs = DB::table('user_product_access')->where('user_id', $u->id)->pluck('product_slug');
+            $u->product_company_ids = $u->product_slugs->mapWithKeys(fn ($slug) => [$slug => \App\Services\ProductCompanyAccess::ids($u->id, $slug)]);
 
             return $u;
         });

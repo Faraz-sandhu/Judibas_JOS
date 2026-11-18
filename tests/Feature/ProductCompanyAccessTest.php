@@ -44,6 +44,21 @@ class ProductCompanyAccessTest extends TestCase
         return User::where('email','separate-scopes@example.test')->firstOrFail();
     }
 
+    public function test_employee_editor_loads_and_replaces_product_scopes_independently(): void
+    {
+        $user=$this->invited();
+        $rows=$this->withSession(['judibas_admin'=>true])->getJson('/admin/api')->assertOk()->json('users');
+        $row=collect($rows)->firstWhere('id',$user->id);
+        $this->assertEquals([$this->a],$row['product_company_ids']['projects']);
+        $this->assertEquals([$this->a,$this->b],$row['product_company_ids']['communication']);
+        $payload=$this->payload();unset($payload['delivery_method'],$payload['pms_task_ids']);
+        $payload['is_active']=true;$payload['password']='';
+        $payload['product_company_ids']['communication']=[$this->b];
+        $this->postJson('/admin/api/users/'.$user->id,$payload)->assertOk();
+        $this->assertEquals([$this->a],ProductCompanyAccess::ids($user->id,'projects'));
+        $this->assertEquals([$this->b],ProductCompanyAccess::ids($user->id,'communication'));
+    }
+
     public function test_invitation_acceptance_saves_each_scope_and_retains_overlap(): void
     {
         $user=$this->invited();
