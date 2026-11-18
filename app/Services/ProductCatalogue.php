@@ -26,6 +26,14 @@ class ProductCatalogue
     public static function validateInvitationCompanies(array $access): void
     {
         $scopes = self::invitationCompanyScopes();
+        if (array_key_exists('product_company_ids', $access)) {
+            foreach ($access['product_company_ids'] as $slug => $companies) {
+                if (isset($scopes[$slug]) && array_diff($companies, $scopes[$slug])) {
+                    throw \Illuminate\Validation\ValidationException::withMessages(['product_company_ids.'.$slug => 'Choose companies from this product’s directory.']);
+                }
+            }
+            return;
+        }
         $allowed = [];
         foreach ($access['product_slugs'] as $slug) {
             // Universal products have no company-specific catalogue group.
@@ -53,7 +61,7 @@ class ProductCatalogue
         $companies = DB::table('communication_companies')->orderBy('name');
         $admin = PlatformAccess::administrator($request);
         if (! $admin) {
-            $companies->whereIn('id', $request->user()?->is_active ? CommunicationAccess::companies($request->user()->id) : []);
+            $companies->whereIn('id', $request->user()?->is_active ? ProductCompanyAccess::allIds($request->user()->id) : []);
         }
         $companies = $companies->get(['id', 'name'])->keyBy(fn ($c) => strtolower($c->name));
         $allowed = collect($products)->keyBy('slug');
@@ -62,13 +70,15 @@ class ProductCatalogue
             if (! $allowed->has($definition['slug']) && ! ($admin && $definition['planned'])) {
                 continue;
             }
+            $productCompanies = $admin ? null : ProductCompanyAccess::ids($request->user()->id,$definition['slug']);
+            $external = collect(config('judibas.products'))->firstWhere('slug',$definition['slug'])['external_url'] ?? null;
             $items = [];
             foreach ($definition['companies'] as $name) {
                 $company = $companies->get(strtolower($name));
-                if (! $company) {
+                if (! $company || ($productCompanies !== null && ! in_array((int)$company->id,$productCompanies,true))) {
                     continue;
                 }
-                $href = null;
+                $href = $external;
                 if (! $definition['planned'] && $definition['slug'] === 'accounts') {
                     $href = CompanyWorkspace::url('accounting',$company->id).'?workspace_group='.$definition['id'];
                 }
@@ -77,11 +87,11 @@ class ProductCatalogue
                 }
                 $items[] = ['name' => $company->name, 'href' => $href];
             }
-            $all = ! $definition['planned'] ? ($definition['slug'] === 'accounts' ? ($admin ? '/accounting/all?workspace_group='.$definition['id'] : '/accounting?workspace_group='.$definition['id']) : '/pms/all') : null;
+            $all = $external ?: (! $definition['planned'] ? ($definition['slug'] === 'accounts' ? ($admin ? '/accounting/all?workspace_group='.$definition['id'] : '/accounting?workspace_group='.$definition['id']) : '/pms/all') : null);
             if (! $admin && ! count($items)) {
                 continue;
             }
-            $groups[] = ['id' => $definition['id'], 'name' => $definition['name'], 'slug' => $definition['slug'], 'description' => $definition['description'], 'planned' => $definition['planned'], 'companies' => $items, 'allHref' => $all];
+            $groups[] = ['id' => $definition['id'], 'name' => $definition['name'], 'slug' => $definition['slug'], 'description' => $definition['description'], 'planned' => $definition['planned'] && !$external, 'externalUrl' => $external, 'companies' => $items, 'allHref' => $all];
         }
 
         return $groups;

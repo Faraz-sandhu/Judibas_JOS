@@ -61,7 +61,7 @@ class PortalController extends Controller
             'workspaceGroupName' => $slug ? \App\Services\CatalogueCompanyScope::label($slug,$request) : null,
             'workspacePath' => $request->attributes->get('workspace.root'),
             'companyWorkspace' => $request->attributes->get('workspace.company'),
-            'workspaceCompanies' => \App\Services\CompanyWorkspace::permitted($request),
+            'workspaceCompanies' => \App\Services\CompanyWorkspace::permitted($request,$slug),
             'productsTheme' => \App\Services\ProductCatalogue::theme(),
             'catalogueGroups' => $request->is('products') ? \App\Services\ProductCatalogue::groups($request, $products) : [],
             'page' => $page,

@@ -1,6 +1,7 @@
 <?php
 
 namespace App\Http\Controllers;
+use App\Services\ProductCompanyAccess;
 
 use App\Modules\Accounting\Services\AccountingAccess;
 use App\Modules\Canteen\Http\Controllers\CatalogController;
@@ -33,7 +34,7 @@ class CompanyWorkspaceController extends Controller
         } else {
             $company = collect(CompanyWorkspace::directory())->firstWhere('slug', $companySlug);
             abort_unless($company, 404, 'Company workspace not found.');
-            abort_unless(PlatformAccess::administrator($r) || in_array($company['id'], CommunicationAccess::companies($r->user()->id), true), 403, 'This company is not assigned to you.');
+            abort_unless(PlatformAccess::administrator($r) || in_array($company['id'], ProductCompanyAccess::ids($r->user()->id,$product), true), 403, 'This company is not assigned to you.');
         }
         $id = $company['id'] ?? 'all';
         $r->attributes->set('workspace.root', '/'.$workspace);

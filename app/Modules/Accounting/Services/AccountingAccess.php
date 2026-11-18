@@ -22,7 +22,7 @@ class AccountingAccess
         $q = DB::table('communication_companies')->orderBy('name');
         if($r->query('workspace_group')!==null || $r->input('company_id')==='all')$q->whereIn('id',\App\Services\CatalogueCompanyScope::ids('accounts',$r));
         if (! PlatformAccess::administrator($r)) {
-            $q->whereIn('id', CommunicationAccess::companies($r->user()->id));
+            $q->whereIn('id', \App\Services\ProductCompanyAccess::ids($r->user()->id,'accounts'));
         }
 
         return $q->get(['id', 'name']);

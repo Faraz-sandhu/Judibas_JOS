@@ -237,7 +237,7 @@ class CommunicationManagementController extends Controller
             if ($i->communication_admin) {
                 $u->communication_admin = true;
             }$u->save();
-            foreach($this->invitationCompanies($i) as $company){DB::table('communication_company_memberships')->updateOrInsert(['user_id'=>$u->id,'company_id'=>$company],[]);Access::community($company);}
+            \App\Services\UserProductAccess::sync($u,['product_slugs'=>['communication'],'company_ids'=>$this->invitationCompanies($i),'product_company_ids'=>['communication'=>$this->invitationCompanies($i)],'communication_admin'=>(bool)$i->communication_admin],true);
             request()->attributes->remove('communication.eligible.'.$u->id);
             DB::table('user_product_access')->updateOrInsert(['user_id' => $u->id, 'product_slug' => 'communication'], []);
             foreach (json_decode($i->group_ids, true) as $gid) {

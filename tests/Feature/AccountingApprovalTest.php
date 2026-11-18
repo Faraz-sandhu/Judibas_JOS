@@ -18,6 +18,7 @@ class AccountingApprovalTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        config(['product-catalogue.groups'=>[...config('product-catalogue.groups'),['id'=>'accounting-test','slug'=>'accounts','name'=>'Test accounting','planned'=>false,'description'=>'Test fixture','companies'=>['Approval test']]]]);
         \Illuminate\Support\Facades\Storage::fake('local');
         $this->company = DB::table('communication_companies')->insertGetId(['name'=>'Approval test', 'created_at'=>now(), 'updated_at'=>now()]);
         $this->withSession(['judibas_admin'=>true]);
@@ -195,6 +196,12 @@ class AccountingApprovalTest extends TestCase
 
     public function test_demo_credentials_are_company_scoped_and_seeder_does_not_duplicate_entries(): void
     {
+        // Isolate fixed demo identities inside this test transaction; rollback restores local accounts.
+        foreach(User::whereIn('email',array_keys(\Database\Seeders\AccountingApprovalDemoSeeder::USERS))->get() as $existing){
+            DB::table('users')->where('id',$existing->id)->update(['email'=>'isolated-'.$existing->id.'-'.Str::uuid().'@example.test']);
+        }
+        $existingDemo=DB::table('communication_companies')->where('name',\Database\Seeders\AccountingApprovalDemoSeeder::COMPANY)->first();
+        if($existingDemo)DB::table('communication_companies')->where('id',$existingDemo->id)->update(['name'=>'Isolated demo '.$existingDemo->id.' '.Str::uuid()]);
         $seeder=app(\Database\Seeders\AccountingApprovalDemoSeeder::class);
         $seeder->run();
         $company=(int)DB::table('communication_companies')->where('name',\Database\Seeders\AccountingApprovalDemoSeeder::COMPANY)->value('id');

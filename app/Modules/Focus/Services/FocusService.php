@@ -31,7 +31,7 @@ class FocusService
     {
         $q = DB::table('communication_companies');
         if (! PlatformAccess::administrator($r)) {
-            $q->whereIn('id', CommunicationAccess::companies($r->user()->id));
+            $q->whereIn('id', \App\Services\ProductCompanyAccess::ids($r->user()->id,'focus-to-do'));
         }
 
         return $q->orderBy('name')->get(['id', 'name'])->all();
@@ -55,7 +55,7 @@ class FocusService
     public static function companyChanged(int $company): void
     {
         $people = DB::table('users')->where('is_active', true)->where(function ($q) use ($company) {
-            $q->where('company_id', $company)->orWhereIn('id', DB::table('communication_company_memberships')->where('company_id', $company)->select('user_id'))->orWhere('judibas_administrator', true);
+            $q->where(function($members)use($company){\App\Services\ProductCompanyAccess::users($members,'focus-to-do',[$company]);})->orWhere('judibas_administrator', true);
         })->where(function ($q) {
             $q->where('judibas_administrator', true)->orWhereIn('id', DB::table('user_product_access')->where('product_slug', 'focus-to-do')->select('user_id'));
         })->pluck('id')->map(fn ($id) => 'user:'.$id)->push('super')->unique()->all();
@@ -73,7 +73,7 @@ class FocusService
         if (! str_starts_with($owner, 'user:')) {
             return;
         }
-        $companies = CommunicationAccess::companies((int) substr($owner, 5));
+        $companies = \App\Services\ProductCompanyAccess::ids((int) substr($owner, 5),'focus-to-do');
         DB::afterCommit(function () use ($companies) {
             foreach ($companies as $company) {
                 self::companyChanged($company);

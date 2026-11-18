@@ -29,21 +29,26 @@ class CommunicationAccess
 
     public static function company(?int $uid = null): ?int
     {
-        return $uid || Auth::id() ? DB::table('users')->where('id', $uid ?: Auth::id())->value('company_id') : null;
+        $uid ??= Auth::id();return $uid ? (ProductCompanyAccess::ids($uid,'communication')[0]??null) : null;
     }
 
     public static function companies(?int $uid=null): array {
         $uid ??= Auth::id();if(!$uid)return [];
-        return array_values(array_unique(array_map('intval',array_filter([self::company($uid),...DB::table('communication_company_memberships')->where('user_id',$uid)->pluck('company_id')->all()]))));
+        return ProductCompanyAccess::ids($uid,'communication');
     }
     public static function attachCompanies($people) {
         $memberships=DB::table('communication_company_memberships')->whereIn('user_id',$people->pluck('id'))->get()->groupBy('user_id');
-        foreach($people as $person){$person->company_ids=array_values(array_unique(array_map('intval',array_filter([$person->company_id,...($memberships->get($person->id)?->pluck('company_id')->all()??[])]))));}
+        $scopes=DB::table('user_product_access')->where('product_slug','communication')->whereIn('user_id',$people->pluck('id'))->pluck('company_ids','user_id');
+        foreach($people as $person){
+            $scope=$scopes->get($person->id);
+            $person->company_ids=$scope!==null?array_map('intval',json_decode($scope,true)?:[]):array_values(array_unique(array_map('intval',array_filter([$person->company_id,...($memberships->get($person->id)?->pluck('company_id')->all()??[])]))));
+        }
         return $people;
     }
     public static function usersInCompanies($query,array $ids): void {
-        $query->where(fn($q)=>$q->whereIn('company_id',$ids)->orWhereIn('id',DB::table('communication_company_memberships')->whereIn('company_id',$ids)->select('user_id')));
+        ProductCompanyAccess::users($query,'communication',$ids);
     }
+
     public static function manager(Request $r): bool
     {
         return \App\Services\PlatformAccess::administrator($r) || (Auth::check() && Auth::user()->is_active && (bool) Auth::user()->communication_admin && DB::table('user_product_access')->where('user_id', Auth::id())->where('product_slug', 'communication')->exists());

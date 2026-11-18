@@ -21,6 +21,7 @@ class AccountingChartTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        config(['product-catalogue.groups'=>[...config('product-catalogue.groups'),['id'=>'accounting-test','slug'=>'accounts','name'=>'Test accounting','planned'=>false,'description'=>'Test fixture','companies'=>['Accounting test A']]]]);
         $this->withoutVite();
         Mail::fake();
         $this->company = DB::table('communication_companies')->insertGetId(['name' => 'Accounting test A', 'created_at' => now(), 'updated_at' => now()]);

@@ -43,7 +43,7 @@ class AccountingApprovalDemoSeeder extends Seeder
             $company = DB::table('communication_companies')->insertGetId(['name'=>self::COMPANY, 'created_at'=>now(), 'updated_at'=>now()]);
             $base = ['company_id'=>$company];
             app(ChartOfAccountsController::class)->initialize($this->request($base));
-            app(BooksController::class)->save($this->request($base + ['version'=>0, 'currency'=>'PKR', 'start_date'=>now()->startOfMonth()->toDateString(), 'approval_required'=>true]));
+            app(BooksController::class)->save($this->request($base + ['version'=>0, 'currency'=>'PKR', 'start_date'=>now()->startOfMonth()->toDateString(), 'approval_required'=>true,'approval_types'=>array_keys(\App\Modules\Accounting\Services\ApprovalPolicy::TYPES)]));
             $users = [];
             foreach (self::USERS as $email => [$name, $role]) {
                 $user = new User();

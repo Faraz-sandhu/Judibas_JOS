@@ -13,6 +13,21 @@ class ProductCatalogueTest extends TestCase
 {
     use DatabaseTransactions;
 
+    public function test_crm_opens_the_external_application_without_linking_to_pms(): void
+    {
+        $this->withoutVite();
+        $company=DB::table('communication_companies')->where('name','Cruxlo')->first();
+        $id=$company?->id??DB::table('communication_companies')->insertGetId(['name'=>'Cruxlo']);
+        $user=User::factory()->create(['is_active'=>true]);
+        UserProductAccess::sync($user,['product_slugs'=>['crm'],'company_ids'=>[$id]]);
+        $this->actingAs($user)->get('/products')->assertOk()->assertViewHas('portal',function($portal){
+            $group=collect($portal['catalogueGroups'])->firstWhere('slug','crm');
+            return $group && !$group['planned'] && $group['allHref']==='https://crm.judibas.com/'
+                && $group['externalUrl']==='https://crm.judibas.com/' && $group['companies'][0]['href']==='https://crm.judibas.com/'
+                && $portal['products'][0]['external_url']==='https://crm.judibas.com/';
+        });
+    }
+
     public function test_theme_selection_persists_and_is_limited_to_super_admin(): void
     {
         DB::table('site_content')->where('key', 'products_theme')->delete();

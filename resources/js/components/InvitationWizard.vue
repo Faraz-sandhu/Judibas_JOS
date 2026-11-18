@@ -1,0 +1,153 @@
+<script setup lang="ts">
+import {computed,ref,watch} from 'vue';
+import AdminDialog from '../AdminDialog.vue';
+const props=defineProps<{data:any;initial?:any;busy?:boolean;error?:string}>();
+const emit=defineEmits<{close:[];submit:[access:any]}>();
+const step=ref(1),name=ref(props.initial?.name||''),email=ref(props.initial?.email||''),personError=ref(''),opened=ref(''),search=ref('');
+const selected=ref<string[]>([...(props.initial?.product_slugs||[])]),companies=ref<Record<string,number[]>>({});
+const pmsRoles=ref<number[]>([]),pmsDepartments=ref<number[]>([]),pmsTasks=ref<number[]>([...(props.initial?.pms_task_ids||[])]);
+const communicationAdmin=ref(false),communicationGroups=ref<number[]>([]),canteenRole=ref('employee'),canteenLevels=ref<Record<number,number|null>>({});
+const accountingRole=ref('viewer'),daymarkRole=ref('employee'),daymarkDepartment=ref<number|null>(null),daymarkDesignation=ref(''),daymarkCustomRole=ref<number|null>(null),daymarkManagers=ref<number[]>([]),daymarkActive=ref(true);
+const delivery=ref('manual');
+const order=['communication','projects','canteen','daymark','cv-bank','accounts','focus-to-do'];
+const products=computed(()=>[...(props.data.products||[])].filter(p=>p.workspace||p.external_url||selected.value.includes(p.slug)).sort((a,b)=>{
+ const ai=order.indexOf(a.slug),bi=order.indexOf(b.slug);return (ai<0?99:ai)-(bi<0?99:bi);
+}));
+const otherProducts=computed(()=>(props.data.products||[]).filter((p:any)=>!p.workspace&&!p.external_url&&!selected.value.includes(p.slug)));
+const chosen=computed(()=>products.value.filter(p=>selected.value.includes(p.slug)));
+function available(slug:string){
+ const ids=props.data.product_company_ids?.[slug];
+ return (props.data.companies||[]).filter((c:any)=>!Array.isArray(ids)||ids.includes(c.id));
+}
+const matching=computed(()=>available(opened.value).filter((c:any)=>c.name.toLowerCase().includes(search.value.trim().toLowerCase())));
+function toggle(slug:string){
+ if(selected.value.includes(slug)){selected.value=selected.value.filter(s=>s!==slug);if(opened.value===slug)opened.value='';}
+ else{selected.value.push(slug);companies.value[slug]||=[];configure(slug);}
+}
+function configure(slug:string){companies.value[slug]||=[];opened.value=opened.value===slug?'':slug;search.value='';}
+function companySummary(slug:string){
+ const ids=companies.value[slug]||[];
+ if(!ids.length)return 'Choose companies';
+ if(ids.length>1&&ids.length===available(slug).length)return 'All '+ids.length+' companies';
+ const names=available(slug).filter((c:any)=>ids.includes(c.id)).map((c:any)=>c.name);
+ return names.length<=2?names.join(', '):names.slice(0,2).join(', ')+' +'+(names.length-2);
+}
+function roleSummary(slug:string){
+ if(slug==='projects')return pmsRoles.value.length?(props.data.pms_roles||[]).filter((r:any)=>pmsRoles.value.includes(r.id)).map((r:any)=>r.role_name).join(', '):'Choose a role';
+ if(slug==='communication')return communicationAdmin.value?'Communication Admin':'Member';
+ if(slug==='accounts')return (props.data.accounting_roles||[]).find((r:any)=>r.slug===accountingRole.value)?.name||'Viewer';
+ if(slug==='canteen')return ({employee:'Employee',admin:'Canteen Admin',kitchen:'Kitchen',cashier:'Cashier'} as any)[canteenRole.value];
+ if(slug==='daymark')return ({employee:'Employee',pm:'Project Manager',om:'Operations Manager',hr:'Human Resources',ceo:'CEO',md:'Managing Director',company_admin:'Company Admin'} as any)[daymarkRole.value];
+ return slug==='cv-bank'?'HR / Recruitment':'Product access';
+}
+function next(){
+ if(step.value===1&&(!email.value.trim()||! /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value))){personError.value='Enter a valid email address to continue.';return;}
+ if(step.value===2){
+  const missing=chosen.value.find(p=>['projects','communication','canteen','accounts','cv-bank','daymark'].includes(p.slug)&&!companies.value[p.slug]?.length);
+  if(missing){personError.value='Choose at least one company for '+missing.name+'.';opened.value=missing.slug;search.value='';return;}
+  if(selected.value.includes('projects')&&!pmsRoles.value.length){personError.value='Choose at least one PMS role.';opened.value='projects';return;}
+ }
+ personError.value='';opened.value='';step.value=Math.min(3,step.value+1);
+}
+function allCompanies(slug:string){companies.value[slug]=available(slug).map((c:any)=>c.id);}
+const daymarkCompany=computed(()=>companies.value.daymark?.[0]||null);
+watch(daymarkCompany,()=>{daymarkDepartment.value=null;daymarkCustomRole.value=null;daymarkManagers.value=[];});
+watch(()=>companies.value.communication,ids=>{communicationGroups.value=communicationGroups.value.filter(id=>(props.data.groups||[]).some((g:any)=>g.id===id&&ids?.includes(g.company_id)));},{deep:true});
+watch(()=>companies.value.projects,ids=>{pmsTasks.value=pmsTasks.value.filter(id=>(props.data.pms_tasks||[]).some((t:any)=>t.id===id&&(!t.platform_company_id||ids?.includes(t.platform_company_id))));},{deep:true});
+function submit(){
+ if(props.busy)return;
+ const map=Object.fromEntries(selected.value.map(slug=>[slug,[...(companies.value[slug]||[])]]));
+ const access:any={name:name.value.trim(),email:email.value.trim(),product_slugs:[...selected.value],product_company_ids:map,company_ids:[...new Set(Object.values(map).flat())],delivery_method:delivery.value};
+ if(selected.value.includes('projects'))Object.assign(access,{pms_role_ids:[...pmsRoles.value],pms_department_ids:[...pmsDepartments.value],pms_task_ids:[...pmsTasks.value]});
+ if(selected.value.includes('communication'))Object.assign(access,{communication_admin:communicationAdmin.value,group_ids:[...communicationGroups.value]});
+ if(selected.value.includes('accounts'))access.accounting_role=accountingRole.value;
+ if(selected.value.includes('canteen'))Object.assign(access,{canteen_role:canteenRole.value,canteen_level_ids:Object.fromEntries(Object.entries(canteenLevels.value).filter(([id])=>companies.value.canteen?.includes(Number(id))))});
+ if(selected.value.includes('daymark'))Object.assign(access,{daymark_company_id:daymarkCompany.value,daymark_role:daymarkRole.value,daymark_department_id:daymarkDepartment.value,daymark_designation:daymarkDesignation.value,daymark_custom_role_id:daymarkCustomRole.value,daymark_manager_ids:[...daymarkManagers.value],daymark_active:daymarkActive.value});
+ emit('submit',access);
+}
+const iconPaths:Record<string,string>={communication:'M4 4h16v12H9l-5 4V4m4 4h8m-8 4h6',projects:'M3 4h18v16H3zM9 4v16m6-16v16','cv-bank':'M6 3h9l4 4v14H6zM9 11h7m-7 4h7',accounts:'M5 3h14v18H5zM8 6h8M8 11h1m3 0h1m3 0h1M8 15h1m3 0h1m3 0h1',canteen:'M5 3v7m3-7v7m-6-7v7h6M5 10v11M17 3v18m0-18c-5 3-5 10 0 10',daymark:'M5 5h14v16H5zM8 3v4m8-4v4M8 11h8m-8 4h5'};
+</script>
+
+<template>
+<AdminDialog title="Invite to Judibas" subtitle="One account. Clear access for every product." :busy="busy" dialog-class="invite-preview-dialog" @close="emit('close')">
+ <fieldset class="invite-preview" :disabled="busy" :aria-busy="busy">
+  <p v-if="error" class="invite-form-error" role="alert">{{error}}</p>
+  <nav class="invite-steps" aria-label="Invitation steps"><template v-for="(label,index) in ['Person','Product access','Review & send']" :key="label"><span v-if="index" class="invite-step-line" :class="{complete:step>index}"></span><button type="button" :disabled="index+1>step" :aria-current="step===index+1?'step':undefined" :class="{active:step===index+1,complete:step>index+1}" @click="step=index+1;opened=''"><b>{{step>index+1?'✓':index+1}}</b><span>{{label}}</span></button></template></nav>
+  <form v-if="step===1" class="invite-person-form" @submit.prevent="next">
+   <div class="invite-section-heading"><h3>Who are you inviting?</h3><p>They will use one account for all assigned products.</p></div>
+   <label>Full name <small>optional</small><input v-model="name" maxlength="100" autocomplete="name" placeholder="e.g. Ayesha Khan"></label>
+   <label>Email address<input v-model="email" type="email" required maxlength="200" autocomplete="email" placeholder="name@company.com"></label>
+   <p v-if="personError" class="invite-form-error" role="alert">{{personError}}</p>
+   <div class="invite-person-note">Already has an account? The invitation will add access to their existing account.</div>
+   <footer class="invite-footer"><span class="invite-footer-note">Your selections stay separate for each product.</span><div><button type="button" class="button" @click="emit('close')">Cancel</button><button class="button primary">Choose product access <span aria-hidden="true">→</span></button></div></footer>
+  </form>
+  <template v-else>
+   <div class="invite-person-summary"><span class="invite-person-avatar">{{(name||email).charAt(0).toUpperCase()}}</span><strong>{{name||'New colleague'}}</strong><span>{{email}}</span><button type="button" @click="step=1">Edit</button></div>
+   <template v-if="step===2">
+    <div class="invite-section-heading"><h3>Choose product access</h3><p>Each product has its own companies and access settings.</p></div>
+    <div class="invite-table-header" aria-hidden="true"><span>Product</span><span>Companies</span><span>Access</span><span></span></div>
+    <div class="invite-product-rows">
+     <article v-for="product in products" :key="product.slug" class="invite-product-row" :class="{'is-selected':selected.includes(product.slug),'is-open':opened===product.slug}">
+      <div class="invite-product-main">
+       <label class="invite-product-name"><input type="checkbox" :checked="selected.includes(product.slug)" :aria-label="'Include '+product.name" @change="toggle(product.slug)"><span class="invite-product-icon" :class="'icon-'+product.slug"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path :d="iconPaths[product.slug]||'M4 4h16v16H4zM4 10h16M10 10v10'"/></svg></span><strong>{{product.name}}</strong></label>
+       <span class="invite-company-summary" :class="{empty:!companies[product.slug]?.length}">{{selected.includes(product.slug)?companySummary(product.slug):'—'}}</span>
+       <span class="invite-access-summary">{{selected.includes(product.slug)?roleSummary(product.slug):'—'}}<small v-if="product.slug==='projects'&&selected.includes('projects')">{{pmsDepartments.length?pmsDepartments.length+' department'+(pmsDepartments.length===1?'':'s'):'No departments selected'}}</small></span>
+       <button v-if="selected.includes(product.slug)" type="button" class="invite-configure" :aria-expanded="opened===product.slug" :aria-controls="'invite-config-'+product.slug" :aria-label="'Configure '+product.name" @click="configure(product.slug)">{{opened===product.slug?'Done':'Configure'}}<span aria-hidden="true">{{opened===product.slug?'✓':'⌄'}}</span></button>
+      </div>
+      <section v-if="opened===product.slug&&selected.includes(product.slug)" :id="'invite-config-'+product.slug" class="invite-product-config" :aria-label="product.name+' access settings'">
+       <div class="invite-config-heading"><strong>{{product.name}} access</strong><span>Changes here apply only to {{product.name}}.</span></div>
+       <div class="invite-config-grid">
+        <fieldset class="invite-company-picker"><legend>{{product.slug==='daymark'?'Reporting company':'Companies'}} <small>{{companies[product.slug]?.length||0}} selected</small></legend><p>{{product.slug==='daymark'?'Daymark keeps one reporting company per person.':Array.isArray(data.product_company_ids?.[product.slug])?'Companies from this product’s directory.':'All companies are available for this universal product.'}}</p>
+         <input v-model="search" type="search" :aria-label="'Search '+product.name+' companies'" placeholder="Search companies...">
+         <div class="invite-company-actions"><button v-if="product.slug!=='daymark'" type="button" @click="allCompanies(product.slug)">Select all {{available(product.slug).length}}</button><button type="button" @click="companies[product.slug]=[]">Clear</button></div>
+         <div class="invite-choice-scroll"><label v-for="company in matching" :key="company.id"><input v-if="product.slug!=='daymark'" type="checkbox" v-model="companies[product.slug]" :value="company.id"><input v-else type="radio" name="preview-daymark-company" :checked="companies.daymark?.includes(company.id)" @change="companies.daymark=[company.id]">{{company.name}}</label><p v-if="!matching.length">No companies match your search.</p></div>
+        </fieldset>
+        <div class="invite-product-permissions">
+         <template v-if="product.slug==='projects'">
+          <fieldset><legend>PMS roles <small>required</small></legend><div class="invite-choice-scroll"><label v-for="role in data.pms_roles||[]" :key="role.id"><input type="checkbox" v-model="pmsRoles" :value="role.id">{{role.role_name}}</label><p v-if="!data.pms_roles?.length">No PMS roles available.</p></div></fieldset>
+          <fieldset><legend>Departments <small>optional</small></legend><p>Uses the existing PMS department structure.</p><div class="invite-choice-scroll"><label v-for="department in data.pms_departments||[]" :key="department.id"><input type="checkbox" v-model="pmsDepartments" :value="department.id">{{department.dept_name}}</label></div></fieldset>
+          <details><summary>Assign tasks <small>{{pmsTasks.length}} selected</small></summary><div class="invite-choice-scroll"><label v-for="task in (data.pms_tasks||[]).filter((t:any)=>!t.platform_company_id||companies.projects?.includes(t.platform_company_id))" :key="task.id"><input type="checkbox" v-model="pmsTasks" :value="task.id">{{task.title}}</label></div></details>
+         </template>
+         <template v-else-if="product.slug==='communication'"><fieldset><legend>Communication role</legend><label><input type="radio" :value="false" v-model="communicationAdmin">Member</label><p>Chat with colleagues in assigned companies.</p><label><input type="radio" :value="true" v-model="communicationAdmin">Communication Admin</label><p>Manage groups and invitations in assigned companies.</p></fieldset><details><summary>Groups <small>optional</small></summary><div class="invite-choice-scroll"><label v-for="group in (data.groups||[]).filter((g:any)=>companies.communication?.includes(g.company_id))" :key="group.id"><input type="checkbox" v-model="communicationGroups" :value="group.id">{{group.name}}</label></div></details></template>
+         <template v-else-if="product.slug==='accounts'"><label class="invite-select-label">Accounting role<select v-model="accountingRole"><option v-for="role in (data.accounting_roles||[]).filter((r:any)=>r.active)" :key="role.slug" :value="role.slug">{{role.name}}</option></select></label><p>Uses Accounting’s existing roles and permissions.</p></template>
+         <template v-else-if="product.slug==='canteen'"><label class="invite-select-label">Canteen role<select v-model="canteenRole"><option value="employee">Employee</option><option value="admin">Canteen Admin</option><option value="kitchen">Kitchen</option><option value="cashier">Cashier</option></select></label><label v-for="company in available('canteen').filter((c:any)=>companies.canteen?.includes(c.id))" :key="company.id" class="invite-select-label">{{company.name}} benefit level<select v-model="canteenLevels[company.id]"><option :value="null">No level assigned</option><option v-for="level in (data.canteen_levels||[]).filter((l:any)=>l.company_id===company.id&&l.active)" :key="level.id" :value="level.id">{{level.name}}</option></select></label></template>
+         <template v-else-if="product.slug==='cv-bank'"><strong>HR / Recruitment</strong><p>Manage jobs, departments, applications and career content in the selected CV Bank companies.</p><p>Company career URLs remain under Super Admin control.</p></template>
+         <template v-else-if="product.slug==='daymark'"><label class="invite-select-label">Reporting role<select v-model="daymarkRole"><option v-for="role in ['employee','pm','om','hr','ceo','md','company_admin']" :key="role" :value="role">{{({employee:'Employee',pm:'Project Manager',om:'Operations Manager',hr:'Human Resources',ceo:'CEO',md:'Managing Director',company_admin:'Company Admin'} as any)[role]}}</option></select></label><label class="invite-select-label">Department<select v-model="daymarkDepartment"><option :value="null">Unassigned</option><option v-for="department in (data.daymark_departments||[]).filter((d:any)=>d.company_id===daymarkCompany)" :key="department.id" :value="department.id">{{department.name}}</option></select></label><label class="invite-select-label">Designation<input v-model="daymarkDesignation" maxlength="200"></label><label class="invite-select-label">Custom role<select v-model="daymarkCustomRole"><option :value="null">Use reporting role permissions</option><option v-for="role in (data.daymark_roles||[]).filter((r:any)=>r.company_id===daymarkCompany)" :key="role.id" :value="role.id">{{role.name}}</option></select></label><fieldset><legend>Reporting managers</legend><div class="invite-choice-scroll"><label v-for="manager in (data.daymark_managers||[]).filter((m:any)=>m.company_id===daymarkCompany)" :key="manager.id"><input type="checkbox" v-model="daymarkManagers" :value="manager.id">{{manager.name}}</label></div><label><input type="checkbox" v-model="daymarkActive">Daymark profile active</label></fieldset></template>
+         <template v-else-if="product.external_url"><strong>External application</strong><p>Opens in a new tab with its own sign-in. Company access inside that application is managed separately.</p></template><template v-else><strong>{{product.name}} access</strong><p>The person can open this product. Product-specific settings stay inside its workspace.</p></template>
+        </div>
+       </div>
+      </section>
+     </article>
+    </div>
+    <p v-if="personError" class="invite-form-error" role="alert">{{personError}}</p><details v-if="otherProducts.length" class="invite-other-products"><summary>More products ({{otherProducts.length}})</summary><div class="invite-choice-scroll"><label v-for="product in otherProducts" :key="product.slug"><input type="checkbox" :aria-label="'Include '+product.name" @change="toggle(product.slug)">{{product.name}}</label></div></details><p class="invite-isolation-note"><span aria-hidden="true">ⓘ</span> Selecting companies for Communication will not change your PMS or CV Bank selection for other products.</p>
+   </template>
+   <template v-else>
+    <div class="invite-section-heading"><h3>Review product access</h3><p>Check which companies and permissions belong to each product.</p></div>
+    <div class="invite-review-products"><article v-for="product in chosen" :key="product.slug"><div><strong>{{product.name}}</strong><button type="button" @click="step=2;opened=product.slug">Edit access</button></div><dl><dt>Companies</dt><dd>{{available(product.slug).filter((c:any)=>companies[product.slug]?.includes(c.id)).map((c:any)=>c.name).join(', ')||'None selected'}}</dd><dt>Role</dt><dd>{{roleSummary(product.slug)}}</dd><template v-if="product.slug==='projects'"><dt>Departments</dt><dd>{{(data.pms_departments||[]).filter((d:any)=>pmsDepartments.includes(d.id)).map((d:any)=>d.dept_name).join(', ')||'None selected'}}</dd><dt>Tasks</dt><dd>{{pmsTasks.length}} selected</dd></template></dl></article></div>
+    <label class="invite-select-label invite-delivery">Invitation delivery<select v-model="delivery"><option value="manual">Create secure link</option><option value="email">Send by email</option></select></label>
+    <p class="invite-preview-notice">Existing users keep their password and current access. This invitation adds the selected permissions when accepted.</p>
+   </template>
+   <footer class="invite-footer"><button type="button" class="button" @click="step--;opened=''">← Back</button><div><span class="invite-footer-note">Your selections stay separate for each product.</span><button v-if="step===2" type="button" class="button primary" :disabled="!selected.length" @click="next">Review invitation →</button><button v-else type="button" class="button primary" :disabled="busy" @click="submit"><span v-if="busy" class="invite-spinner" aria-hidden="true"></span>{{busy?'Creating invitation...':delivery==='email'?'Send invitation':'Create invitation link'}}</button></div></footer>
+  </template>
+ </fieldset>
+</AdminDialog>
+</template>
+
+<style>
+.invite-footer-note{font-size:10px;color:var(--muted);max-width:190px;line-height:1.6}.invite-other-products{margin:15px 0;font-size:12px}.invite-other-products summary{cursor:pointer;padding:8px 0}.invite-spinner{display:inline-block;width:12px;height:12px;border:2px solid #ffffff60;border-top-color:#fff;border-radius:50%;animation:invite-spin .7s linear infinite;margin-right:7px}@keyframes invite-spin{to{transform:rotate(360deg)}}
+
+.invite-preview-dialog .invite-product-name,.invite-preview-dialog .invite-choice-scroll label,.invite-preview-dialog .invite-product-permissions fieldset>label{flex-direction:row;text-align:left}
+.judibas-admin-dialog.invite-preview-dialog{width:min(940px,calc(100vw - 32px));max-width:940px}
+.invite-preview-dialog .admin-dialog-content{padding-top:0}
+.invite-preview{border:0;margin:0;padding:0;min-width:0;--invite-accent:#7665ed;--invite-soft:#7665ed12;color:var(--text);font-size:13px}
+.invite-preview-label{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--muted);padding:0 0 14px;border-bottom:1px solid var(--line)}
+.invite-preview-label>span{width:6px;height:6px;background:#b7791f;border-radius:50%}.invite-preview-label small{margin-left:auto}
+.invite-steps{display:flex;align-items:center;justify-content:center;padding:24px 0 28px;gap:14px}.invite-steps button{display:flex;align-items:center;gap:9px;background:none;border:0;color:var(--muted);font:inherit;white-space:nowrap;padding:0;cursor:pointer}.invite-steps button:disabled{cursor:default}.invite-steps b{display:grid;place-items:center;width:29px;height:29px;border-radius:50%;background:var(--rail);border:1px solid var(--line);font-size:12px}.invite-steps .active{color:var(--text);font-weight:600}.invite-steps .active b,.invite-steps .complete b{background:var(--invite-accent);border-color:var(--invite-accent);color:#fff}.invite-step-line{height:1px;background:var(--line);width:60px}.invite-step-line.complete{background:var(--invite-accent)}
+.invite-person-form{max-width:560px;margin:0 auto}.invite-section-heading{margin:4px 0 20px}.invite-section-heading h3{font-size:18px;letter-spacing:-.3px;margin:0 0 7px}.invite-section-heading p{color:var(--muted);font-size:12px;margin:0;line-height:1.6}.invite-person-form>label,.invite-select-label{display:grid;gap:8px;font-weight:500;font-size:12px;margin:0 0 17px}.invite-person-form>label>small{font-weight:400;color:var(--muted)}
+.invite-preview :is(input:not([type=checkbox]):not([type=radio]),select){box-sizing:border-box;width:100%;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--text);font:inherit;font-size:12px}.invite-preview input:is([type=checkbox],[type=radio]){width:15px;height:15px;flex-shrink:0;accent-color:var(--invite-accent);margin:0}.invite-preview :is(button,input,select):focus-visible{outline:2px solid var(--invite-accent);outline-offset:3px}.invite-form-error{color:#df4444}.invite-person-note,.invite-preview-notice{background:var(--rail);border:1px solid var(--line);border-radius:9px;padding:13px;line-height:1.7;color:var(--muted);font-size:12px}
+.invite-person-summary{display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--rail);border:1px solid var(--line);border-radius:9px;margin-bottom:25px}.invite-person-avatar{width:29px;height:29px;display:grid;place-items:center;border-radius:8px;color:var(--invite-accent);background:var(--invite-soft);font-weight:600}.invite-person-summary>span:not(.invite-person-avatar){color:var(--muted);overflow-wrap:anywhere}.invite-person-summary button{margin-left:auto}.invite-person-summary button,.invite-company-actions button,.invite-review-products button{background:none;border:0;color:var(--invite-accent);cursor:pointer;font:inherit;font-size:12px;padding:4px}
+.invite-table-header,.invite-product-main{display:grid;grid-template-columns:minmax(170px,1.15fr) minmax(135px,1fr) minmax(120px,.9fr) 100px;align-items:center;gap:14px}.invite-table-header{background:var(--rail);border-radius:7px;padding:9px 12px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;font-size:10px}.invite-product-main{padding:15px 12px;min-height:42px}.invite-product-row{border-bottom:1px solid var(--line);min-width:0}.invite-product-row.is-open{border-radius:9px;background:var(--invite-soft);border:1px solid #7665ed38;margin:4px 0}.invite-product-name{display:flex;align-items:center;gap:10px;cursor:pointer;min-width:0}.invite-product-name strong{font-size:13px;overflow-wrap:anywhere}.invite-product-icon{display:grid;place-items:center;width:32px;height:32px;border-radius:9px;color:var(--invite-accent);background:var(--invite-soft);flex-shrink:0}.invite-product-icon svg{width:18px;height:18px}.invite-product-icon.icon-communication{color:#159b83;background:#159b8312}.invite-product-icon.icon-canteen{color:#bb6a0a;background:#bb6a0a12}.invite-product-row:not(.is-selected) .invite-product-icon{filter:grayscale(1);opacity:.6}.invite-company-summary{font-size:12px;color:var(--text);overflow-wrap:anywhere}.invite-company-summary.empty,.invite-product-row:not(.is-selected) :is(.invite-company-summary,.invite-access-summary){color:var(--muted)}.invite-access-summary{font-size:12px;overflow-wrap:anywhere}.invite-access-summary small{display:block;color:var(--muted);font-size:10px;margin-top:5px}.invite-configure{display:flex;justify-content:center;align-items:center;gap:7px;padding:7px 8px;border:1px solid var(--line);border-radius:6px;color:var(--invite-accent);background:var(--bg);font:inherit;font-size:11px;cursor:pointer}
+.invite-product-config{padding:16px 18px 20px;border-top:1px solid #7665ed25}.invite-config-heading{display:flex;flex-wrap:wrap;justify-content:space-between;gap:7px;margin-bottom:18px}.invite-config-heading strong{font-size:12px}.invite-config-heading span{font-size:11px;color:var(--muted)}.invite-config-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px}.invite-preview fieldset{padding:0;margin:0 0 15px;border:0;min-width:0}.invite-preview legend{font-size:12px;font-weight:600;padding:0;margin-bottom:8px}.invite-preview :is(legend,summary) small{font-weight:400;color:var(--muted);margin-left:5px;font-size:10px}.invite-product-config p{color:var(--muted);font-size:11px;line-height:1.6;margin:5px 0 10px}.invite-company-actions{display:flex;gap:12px;justify-content:space-between;margin:7px 0}.invite-choice-scroll{max-height:165px;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}.invite-choice-scroll label,.invite-product-permissions fieldset>label{display:flex;align-items:center;gap:9px;padding:8px 5px;border-radius:6px;font-size:12px;cursor:pointer}.invite-choice-scroll label:hover{background:var(--rail)}.invite-product-permissions details{font-size:12px;padding:8px 0;border-top:1px solid var(--line)}.invite-product-permissions summary{cursor:pointer;padding:4px 0}.invite-product-permissions .invite-select-label{margin-bottom:14px}.invite-isolation-note{display:flex;gap:8px;line-height:1.7;font-size:11px;color:var(--muted);background:var(--rail);padding:12px;border-radius:8px;margin:18px 0}
+.invite-review-products{display:grid;gap:12px}.invite-review-products article{border:1px solid var(--line);border-radius:9px;padding:14px 16px}.invite-review-products article>div{display:flex;align-items:center;justify-content:space-between}.invite-review-products dl{display:grid;grid-template-columns:100px minmax(0,1fr);gap:10px;margin:13px 0 0;font-size:12px}.invite-review-products dt{color:var(--muted)}.invite-review-products dd{margin:0;overflow-wrap:anywhere}.invite-delivery{margin-top:20px;max-width:300px}.invite-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid var(--line);padding-top:18px;margin-top:24px}.invite-footer>div{display:flex;gap:9px}.invite-footer .button{font-size:12px;padding:10px 13px}.invite-footer .primary{background:var(--invite-accent);color:white;border-color:transparent}.invite-footer button:disabled{opacity:.5;cursor:not-allowed}
+@media(max-width:700px){.invite-preview-dialog .admin-dialog-content{padding:15px}.invite-steps{gap:8px;padding:18px 0}.invite-step-line{width:16px}.invite-steps button{font-size:11px;gap:5px}.invite-steps b{width:24px;height:24px}.invite-preview-label small{display:none}.invite-person-summary{flex-wrap:wrap;gap:8px}.invite-person-summary>span:not(.invite-person-avatar){flex-basis:75%;margin-left:37px;font-size:11px}.invite-person-summary button{position:absolute;right:30px}.invite-table-header{display:none}.invite-product-main{grid-template-columns:minmax(0,1fr) auto;gap:9px;padding:13px 10px}.invite-product-name{grid-column:1;grid-row:1}.invite-configure{grid-column:2;grid-row:1/3}.invite-company-summary,.invite-access-summary{grid-column:1;margin-left:25px;font-size:11px}.invite-config-grid{grid-template-columns:minmax(0,1fr);gap:12px}.invite-config-heading{display:grid}.invite-product-config{padding:14px 12px}.invite-footer{align-items:flex-start;flex-wrap:wrap}.invite-footer>div{flex-wrap:wrap;margin-left:auto}.invite-footer .button{font-size:11px;padding:9px}.invite-review-products dl{grid-template-columns:85px minmax(0,1fr)}}
+</style>

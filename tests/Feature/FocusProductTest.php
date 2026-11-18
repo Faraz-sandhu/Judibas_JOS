@@ -39,6 +39,7 @@ class FocusProductTest extends TestCase
 
     public function test_access_and_personal_ownership_are_enforced(): void
     {
+        $superTasks=DB::table('focus_tasks')->where('owner','super')->count();
         $this->get('/focus-to-do')->assertRedirect('/login');
         $u = User::factory()->create(['is_active' => true]);
         $this->actingAs($u)->getJson('/focus-to-do/api/data')->assertForbidden();
@@ -48,7 +49,7 @@ class FocusProductTest extends TestCase
         $this->actingAs($b)->getJson('/focus-to-do/api/data')->assertOk()->assertJsonCount(0, 'tasks');
         $this->deleteJson('/focus-to-do/api/tasks/'.$id)->assertNotFound();
         $this->postJson('/focus-to-do/api/tasks/'.$id.'/complete', ['completed' => true])->assertNotFound();
-        $this->withSession(['judibas_admin' => true])->getJson('/focus-to-do/api/data')->assertOk()->assertJsonCount(0, 'tasks');
+        $this->withSession(['judibas_admin' => true])->getJson('/focus-to-do/api/data')->assertOk()->assertJsonCount($superTasks, 'tasks');
     }
 
     public function test_repeat_completion_is_idempotent_and_reopening_does_not_duplicate(): void

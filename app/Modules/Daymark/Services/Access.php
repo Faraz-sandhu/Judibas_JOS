@@ -21,7 +21,7 @@ class Access
         }
         $u = User::find($r->user()->id);
         abort_unless($u && $u->active, 403, 'Ask your administrator to configure your Daymark reporting profile.');
-        abort_unless(in_array($u->company_id, CommunicationAccess::companies($u->id), true), 403, 'Your Daymark company is no longer assigned.');
+        abort_unless(in_array($u->company_id, \App\Services\ProductCompanyAccess::ids($u->id,'daymark'), true), 403, 'Your Daymark company is no longer assigned.');
 
         return $u;
     }

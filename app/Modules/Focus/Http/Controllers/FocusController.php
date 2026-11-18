@@ -233,7 +233,7 @@ class FocusController
         abort_unless(collect(F::companies($r))->contains('id', $company), 403);
 
         return DB::table('users')->where(function ($q) use ($company) {
-            $q->where('users.company_id', $company)->orWhereIn('users.id', DB::table('communication_company_memberships')->where('company_id', $company)->select('user_id'));
+            \App\Services\ProductCompanyAccess::users($q,'focus-to-do',[$company]);
         })->where('users.is_active', true)
             ->whereExists(fn ($q) => $q->selectRaw('1')->from('user_product_access')->whereColumn('user_product_access.user_id', 'users.id')->where('product_slug', 'focus-to-do'))->select('users.id', 'users.name')->distinct()->get()->all();
     }

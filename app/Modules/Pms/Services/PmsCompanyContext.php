@@ -26,11 +26,7 @@ class PmsCompanyContext
         if ($r->attributes->has('pms.allowed_platform_ids')) {
             return $r->attributes->get('pms.allowed_platform_ids');
         }
-        $ids = DB::table('communication_company_memberships')->where('user_id', $r->user()->id)->pluck('company_id')->all();
-        if ($r->user()->company_id) {
-            $ids[] = $r->user()->company_id;
-        }
-        $ids = array_values(array_unique(array_map('intval', $ids)));
+        $ids = \App\Services\ProductCompanyAccess::ids($r->user()->id,'projects');
         if($catalogue!==null)$ids=array_values(array_intersect($ids,$catalogue));
         $r->attributes->set('pms.allowed_platform_ids', $ids);
 
@@ -71,8 +67,6 @@ class PmsCompanyContext
         if ($ids === null) {
             return;
         }
-        $query->whereIn($column, DB::table('users')->where(function ($users) use ($ids) {
-            $users->whereIn('company_id', $ids)->orWhereIn('id', DB::table('communication_company_memberships')->whereIn('company_id', $ids)->select('user_id'));
-        })->select('id'));
+        \App\Services\ProductCompanyAccess::users($query,'projects',$ids,$column);
     }
 }

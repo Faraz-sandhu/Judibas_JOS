@@ -7,7 +7,7 @@ class CvBankAccess {
  public static function legacyId():int {return (int)DB::table('cv_bank_settings')->where('id',1)->value('company_id');}
  public static function companies(Request $r){
   self::authorize($r);$q=DB::table('communication_companies as c')->leftJoin('cv_bank_company_pages as p','p.company_id','=','c.id');
-  if(!PlatformAccess::administrator($r))$q->whereIn('c.id',CommunicationAccess::companies($r->user()->id));
+  if(!PlatformAccess::administrator($r))$q->whereIn('c.id',ProductCompanyAccess::ids($r->user()->id,'cv-bank'));
   return $q->orderBy('c.name')->get(['c.id','c.name','p.slug as career_slug','p.published as career_published'])->map(function($c){$c->career_url=$c->career_slug?'/careers/'.$c->career_slug:null;return $c;});
  }
  public static function company(Request $r,?int $id=null):object {

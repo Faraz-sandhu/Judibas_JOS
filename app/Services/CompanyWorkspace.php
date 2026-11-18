@@ -37,12 +37,12 @@ class CompanyWorkspace
         return $result;
     }
 
-    public static function permitted(Request $r): array
+    public static function permitted(Request $r, ?string $product = null): array
     {
         if (! $r->user()?->is_active && ! PlatformAccess::administrator($r)) {
             return [];
         }
-        $ids = PlatformAccess::administrator($r) ? null : CommunicationAccess::companies($r->user()->id);
+        $ids = PlatformAccess::administrator($r) ? null : ($product ? ProductCompanyAccess::ids($r->user()->id,$product) : ProductCompanyAccess::allIds($r->user()->id));
 
         return array_values(array_filter(self::directory(), fn ($c) => $ids === null || in_array($c['id'], $ids, true)));
     }

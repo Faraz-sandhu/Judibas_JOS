@@ -8,7 +8,7 @@ class Realtime {
  public static function recipients(Report $report):array {
   $ids=[];
   foreach(User::where('company_id',$report->user->company_id)->get() as $viewer){
-   if($viewer->active&&in_array($viewer->company_id,\App\Services\CommunicationAccess::companies($viewer->id),true)&&RoleAccess::allows($viewer,'view_reports')&&Report::visibleTo($viewer)->whereKey($report->id)->exists())$ids[]=(string)$viewer->id;
+   if($viewer->active&&in_array($viewer->company_id,\App\Services\ProductCompanyAccess::ids($viewer->id,'daymark'),true)&&RoleAccess::allows($viewer,'view_reports')&&Report::visibleTo($viewer)->whereKey($report->id)->exists())$ids[]=(string)$viewer->id;
   }
   if($report->status!=='draft'){
    $ids[]='super';
