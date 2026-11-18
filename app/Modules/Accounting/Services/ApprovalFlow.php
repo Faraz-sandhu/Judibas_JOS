@@ -31,9 +31,14 @@ class ApprovalFlow
 
     public static function document(int $company,string $type,int $id): array
     {
+        if (ImprestFunds::restricted(request())) {
+            abort_unless($type==='journal',403,'Use your assigned imprest vouchers.');
+            ImprestFunds::authorizeJournal(request(),$company,$id);
+        }
         $table=match($type){'journal'=>'accounting_journals','invoice'=>'accounting_invoices','payment'=>'accounting_payment_requests',default=>abort(422,'Invalid approval document type.')};
         $row=DB::table($table)->where('company_id',$company)->where('id',$id)->first();abort_unless($row,404);
         if($type==='journal'){
+            abort_if(ImprestFunds::movement($id)?->void,422,'This imprest draft was cancelled.');
             Ledger::requireManual($company,$id);$detail=Ledger::document($company,$id);$permission=Permissions::journalGroup($row->kind);
         }elseif($type==='invoice'){$detail=TradeDocuments::invoice($company,$id);$permission=$row->kind==='sale'?'sales':'purchases';}
         else{$payload=json_decode($row->payload,true);$invoice=DB::table('accounting_invoices')->where('company_id',$company)->where('id',$row->invoice_id)->first();$detail=(array)$row+['number'=>'PAYREQ-'.str_pad((string)$id,7,'0',STR_PAD_LEFT),'posting_date'=>$payload['posting_date'],'total'=>$payload['amount'],'party_name'=>$invoice->party_name,'reference'=>$payload['reference'],'payload'=>$payload];$permission='payments';}

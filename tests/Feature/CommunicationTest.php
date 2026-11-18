@@ -165,8 +165,8 @@ class CommunicationTest extends TestCase
         $this->getJson("/communication/api/conversations/$id/messages")->assertJsonPath('messages.0.body', 'Hello colleague');
         $this->getJson('/communication/api')->assertJsonPath('conversations.0.unread', 0);
         $this->patchJson("/communication/api/messages/$mid", ['body' => 'Not my message'])->assertForbidden();
-        $this->actingAs($a)->patchJson("/communication/api/messages/$mid", ['body' => 'Updated'])->assertForbidden();
-        $this->assertDatabaseHas('communication_messages', ['id' => $mid, 'body' => 'Hello colleague', 'edited_at' => null]);
+        $this->actingAs($a)->patchJson("/communication/api/messages/$mid", ['body' => 'Updated'])->assertOk();
+        $this->assertDatabaseHas('communication_messages', ['id' => $mid, 'body' => 'Updated']);
         $this->deleteJson("/communication/api/messages/$mid")->assertForbidden();
         $this->withSession(['judibas_admin' => true])->deleteJson("/communication/api/messages/$mid")->assertOk();
         $this->getJson("/communication/api/conversations/$id/messages")->assertJsonPath('messages.0.body', null);

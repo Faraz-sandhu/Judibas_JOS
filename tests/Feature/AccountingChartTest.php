@@ -28,15 +28,41 @@ class AccountingChartTest extends TestCase
         $this->other = DB::table('communication_companies')->insertGetId(['name' => 'Accounting test B', 'created_at' => now(), 'updated_at' => now()]);
     }
 
+    public function test_non_current_assets_default_and_backfill_preserve_existing_accounts(): void
+    {
+        $this->actingAs($this->member());
+        $this->postJson('/accounting/api/initialize', ['company_id'=>$this->company])->assertOk();
+        $group=DB::table('accounting_accounts')->where('company_id',$this->company)->where('name','Non-current Assets')->first();
+        $this->assertNotNull($group);
+        $this->assertSame($this->root()->id,$group->parent_id);
+        $this->assertSame('01-02',$group->code);
+        $this->assertTrue((bool)$group->is_group);
+        DB::table('accounting_accounts')->where('id',$group->id)->delete();
+        // A customer already uses the preferred code for another account.
+        $custom=$this->postJson('/accounting/api/accounts',$this->payload(['code'=>'01-02','name'=>'Custom asset group','is_group'=>true,'account_type'=>'General']))->assertOk()->json('account');
+        $before=DB::table('accounting_accounts')->where('company_id',$this->company)->orderBy('id')->get()->toJson();
+        $migration=require database_path('migrations/2026_11_18_130000_add_default_non_current_assets.php');
+        $migration->up();
+        $new=DB::table('accounting_accounts')->where('company_id',$this->company)->where('name','Non-current Assets')->first();
+        $this->assertSame('01-03',$new->code);
+        $this->assertSame($before,DB::table('accounting_accounts')->where('company_id',$this->company)->where('id','!=',$new->id)->orderBy('id')->get()->toJson());
+        $migration->up();
+        $this->assertSame(1,DB::table('accounting_accounts')->where('company_id',$this->company)->where('name','Non-current Assets')->count());
+        $migration->down();
+        $this->assertDatabaseHas('accounting_accounts',['id'=>$new->id]);
+        $this->assertDatabaseHas('accounting_accounts',['id'=>$custom['id'],'code'=>'01-02']);
+        $this->assertDatabaseMissing('accounting_accounts',['company_id'=>$this->other]);
+    }
+
     public function test_automatic_codes_follow_the_parent_and_skip_existing_codes(): void
     {
         $this->actingAs($this->member());
         $this->postJson('/accounting/api/initialize', ['company_id' => $this->company])->assertOk();
         $this->assertSame('01', $this->root()->code);
         $group = $this->postJson('/accounting/api/accounts', $this->payload(['code' => '', 'is_group' => true, 'account_type' => 'General']))->assertOk()->json('account');
-        $this->assertSame('01-02', $group['code']);
-        $this->postJson('/accounting/api/accounts', $this->payload(['code' => '', 'parent_id' => $group['id']]))->assertOk()->assertJsonPath('account.code', '01-02-01');
-        $this->postJson('/accounting/api/accounts', $this->payload(['code' => '', 'parent_id' => $group['id']]))->assertOk()->assertJsonPath('account.code', '01-02-02');
+        $this->assertSame('01-03', $group['code']);
+        $this->postJson('/accounting/api/accounts', $this->payload(['code' => '', 'parent_id' => $group['id']]))->assertOk()->assertJsonPath('account.code', '01-03-01');
+        $this->postJson('/accounting/api/accounts', $this->payload(['code' => '', 'parent_id' => $group['id']]))->assertOk()->assertJsonPath('account.code', '01-03-02');
         $this->getJson('/accounting/api/data?company_id='.$this->company)->assertOk();
     }
 

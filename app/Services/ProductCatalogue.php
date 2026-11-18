@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\DB;
 
 class ProductCatalogue
 {
-    public const THEMES = ['workspace', 'directory', 'classic', 'disclosure'];
+    public const THEMES = ['workspace', 'directory', 'classic', 'disclosure', 'stacked'];
 
     /** Grouped products use the same company lists as the product page. */
     public static function invitationCompanyScopes(): array

@@ -16,7 +16,7 @@ const today=new Date().toLocaleDateString('en-CA'),page=ref(1),loading=ref(false
 const contact=computed(()=>['customers','suppliers'].includes(props.section));
 const sale=computed(()=>props.section==='sales');
 const title=computed(()=>({customers:'Customers',suppliers:'Suppliers',sales:'Sales invoices',purchases:'Purchase invoices'} as Record<string,string>)[props.section]);
-const ledgers=computed(()=>props.accounts.filter(a=>a.active&&!a.is_group));
+const ledgers=computed(()=>props.accounts.filter(a=>!a.imprest_fund&&a.active&&!a.is_group));
 const controls=computed(()=>ledgers.value.filter(a=>a.account_type===(sale.value?'Receivable':'Payable')));
 const lineAccounts=computed(()=>ledgers.value.filter(a=>(sale.value?a.root_type==='Income':['Expense','Asset'].includes(a.root_type))&&!['Receivable','Payable','Cash','Bank'].includes(a.account_type)));
 const taxAccounts=computed(()=>ledgers.value.filter(a=>a.root_type===(sale.value?'Liability':'Asset')&&!['Receivable','Payable','Cash','Bank'].includes(a.account_type)));

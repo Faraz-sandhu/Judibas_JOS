@@ -32,6 +32,9 @@ class ApprovalController
         $v=$r->validate(['company_id'=>'required|integer','id'=>'nullable|integer|min:1','stage'=>'nullable|string|max:30','page'=>'nullable|integer|min:1']);$company=(int)$v['company_id'];
         Access::company($r,$company,'workflow.view');
         $rows=DB::table('accounting_approvals')->where('company_id',$company)->when($v['id']??null,fn($q,$id)=>$q->where('id',$id))->when($v['stage']??null,fn($q,$s)=>$q->where('stage',$s))->orderByDesc('updated_at')->orderByDesc('id')->paginate(15);
+        if (\App\Modules\Accounting\Services\ImprestFunds::restricted($r)) {
+            $rows=DB::table('accounting_approvals')->where('company_id',$company)->where('document_type','journal')->whereIn('document_id',DB::table('accounting_imprest_movements as m')->join('accounting_imprest_funds as f','f.id','=','m.fund_id')->where('f.user_id',$r->user()->id)->where('f.company_id',$company)->where('m.void',false)->select('m.journal_id'))->when($v['id']??null,fn($q,$id)=>$q->where('id',$id))->when($v['stage']??null,fn($q,$stage)=>$q->where('stage',$stage))->orderByDesc('id')->paginate(15);
+        }
         $rows->setCollection($rows->getCollection()->map(fn($a)=>$this->decorate($r,$a)));
         return ['entries'=>$rows,'stages'=>Flow::STAGES,'enabled'=>Flow::enabled($company)];
     }

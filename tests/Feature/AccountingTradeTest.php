@@ -61,7 +61,7 @@ class AccountingTradeTest extends TestCase
 
     public function test_cash_basis_allocates_purchase_payment_between_expense_and_asset(): void
     {
-        $asset = DB::table('accounting_accounts')->insertGetId(['company_id' => $this->company, 'parent_id' => $this->accounts['1000'], 'code' => '01-02', 'name' => 'Equipment', 'root_type' => 'Asset', 'account_type' => 'Fixed Asset']);
+        $asset = DB::table('accounting_accounts')->insertGetId(['company_id' => $this->company, 'parent_id' => $this->accounts['01-02'], 'code' => '01-02-01', 'name' => 'Equipment', 'root_type' => 'Asset', 'account_type' => 'Fixed Asset']);
         $invoice = $this->create($this->body('purchase', ['lines' => [
             ['description' => 'Office costs', 'account_id' => $this->accounts['5110'], 'quantity' => '1', 'rate' => '80.00'],
             ['description' => 'Equipment', 'account_id' => $asset, 'quantity' => '1', 'rate' => '20.00'],

@@ -19,6 +19,7 @@ class JournalController
         $kind = ! empty($v['id']) ? DB::table('accounting_journals')->where('company_id', $company)->where('id', $v['id'])->value('kind') : ($v['kind'] ?? 'general');
         if(!$r->boolean('vouchers')||!empty($v['id']))Permissions::require($r, Permissions::journalGroup($kind ?? 'general').'.view');
         if (! empty($v['id'])) {
+            \App\Modules\Accounting\Services\ImprestFunds::authorizeJournal($r,$company,(int)$v['id']);
             return ['journal' => Ledger::document($company, $v['id'])];
         }
         $q = DB::table('accounting_journals')->where('company_id', $company)->when($v['kind'] ?? null, fn ($q, $kind) => $q->where('kind', $kind), fn ($q) => $q->whereNotIn('kind', array_keys(VoucherTypes::TYPES)))->when($v['status'] ?? null, fn ($q, $s) => $q->where('status', $s))->when($v['search'] ?? null, fn ($q, $s) => $q->where(fn ($q) => $q->where('number', 'ilike', '%'.$s.'%')->orWhere('reference', 'ilike', '%'.$s.'%')->orWhere('remarks', 'ilike', '%'.$s.'%')->orWhere('voucher_person', 'ilike', '%'.$s.'%')));
@@ -26,6 +27,7 @@ class JournalController
             $allowed=array_values(array_filter(array_keys(VoucherTypes::TYPES),fn($k)=>Permissions::can($r,Permissions::journalGroup($k).'.view')));abort_unless($allowed,403);
             $q=DB::table('accounting_journals')->where('company_id',$company)->whereIn('kind',$allowed)->when($v['kind']??null,fn($q,$k)=>$q->where('kind',$k))->when($v['status']??null,fn($q,$s)=>$q->where('status',$s))->when($v['search']??null,fn($q,$s)=>$q->where(fn($q)=>$q->where('number','ilike','%'.$s.'%')->orWhere('reference','ilike','%'.$s.'%')->orWhere('voucher_person','ilike','%'.$s.'%')));
         }
+        if (\App\Modules\Accounting\Services\ImprestFunds::restricted($r)) $q->whereIn('id',DB::table('accounting_imprest_movements as m')->join('accounting_imprest_funds as f','f.id','=','m.fund_id')->where('f.company_id',$company)->where('f.user_id',$r->user()->id)->select('m.journal_id'));
         $rows = $q->orderByDesc('posting_date')->orderByDesc('id')->paginate(15);
         $rows->setCollection($rows->getCollection()->map(fn ($j) => Ledger::document($company, $j->id)));
 
@@ -44,6 +46,8 @@ class JournalController
             $q = DB::table('accounting_journals')->where('company_id', $company);
             $old = ! empty($v['id']) ? (clone $q)->where('id', $v['id'])->first() : null;
             abort_if(! empty($v['id']) && ! $old, 404);
+            abort_if($old && \App\Modules\Accounting\Services\ImprestFunds::movement($old->id),422,'Imprest vouchers cannot be edited here. Cancel the non-posted voucher in Imprest / Petty Cash and create a replacement.');
+            abort_if(DB::table('accounting_imprest_funds')->whereIn('account_id',array_column($v['lines'],'account_id'))->exists(),422,'Officer fund accounts can only be used through Imprest / Petty Cash.');
             if ($old) ApprovalFlow::ensureEditable($company, 'journal', $old->id);
             $fx=Currency::context($company,$v);$foreign=$fx['currency']!==$book->currency;
             $lines = $foreign?Currency::journalLines($company,$v['lines'],$fx):Ledger::lines($company,$v['lines']);
@@ -117,6 +121,7 @@ class JournalController
         return DB::transaction(function () use ($r, $id, $v, $company, $outer) {
             if ($outer && DB::getDriverName() === 'pgsql') DB::statement('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
             Access::company($r, $company);
+            \App\Modules\Accounting\Services\ImprestFunds::authorizeJournal($r,$company,$id);
             $journal = Ledger::document($company, $id);
             Permissions::require($r, Permissions::journalGroup($journal['kind']).'.print');
             abort_if(isset($v['version']) && (int) $v['version'] !== (int) $journal['version'], 409, 'This journal has changed. Reopen it before printing.');
@@ -131,6 +136,7 @@ class JournalController
     {
         $company = (int) $r->validate(['company_id' => 'required|integer'])['company_id'];
         Access::company($r, $company);
+        \App\Modules\Accounting\Services\ImprestFunds::authorizeJournal($r,$company,$id);
         $journal = Ledger::document($company, $id);
         abort_unless(isset(VoucherTypes::TYPES[$journal['kind']]), 404);
         Permissions::require($r, Permissions::journalGroup($journal['kind']).'.print');

@@ -160,7 +160,17 @@ class CommunicationController extends Controller
             $messages = $q->orderByDesc('id')->limit(50)->get()->reverse()->values();
         }
         $reactions = DB::table('communication_reactions as cr')->join('users as u', 'u.id', '=', 'cr.user_id')->whereIn('cr.message_id', $messages->pluck('id'))->get(['cr.message_id', 'cr.user_id', 'cr.emoji', 'u.name'])->groupBy('message_id');
+        $edits = $this->isAdmin($r)
+            ? DB::table('communication_message_edits')->whereIn('message_id', $messages->pluck('id'))->orderBy('id')->get()->groupBy('message_id')
+            : collect();
         foreach ($messages as $m) {
+            if ($this->isAdmin($r) && ! $m->protected_payload) {
+                $m->edit_history = $edits->get($m->id, collect())->map(fn ($edit) => [
+                    'id'=>$edit->id,'before'=>\Illuminate\Support\Facades\Crypt::decryptString($edit->previous_body),
+                    'after'=>\Illuminate\Support\Facades\Crypt::decryptString($edit->updated_body),
+                    'editor_name'=>$edit->editor_name,'edited_at'=>$edit->edited_at,
+                ])->values();
+            }
             $m->reactions = $m->deleted_at ? [] : $reactions->get($m->id, collect())->values();
             if ($m->deleted_at) {
                 $m->protected_payload = null;
@@ -314,17 +324,27 @@ class CommunicationController extends Controller
     public function updateMessage(Request $r, int $id)
     {
         $this->mutable($r);
-        abort_unless($this->isAdmin($r), 403, 'Message editing is disabled. Send a correction as a new reply instead.');
-        $m = DB::table('communication_messages')->where('id', $id)->first();
-        abort_unless($m, 404);
-        $c = $this->conversation($r, $m->conversation_id);
-        abort_if($m->protected_payload, 422, 'Protected messages cannot be edited. Send a new protected message instead.');
-        abort_unless($c->kind !== 'community' || \App\Services\PlatformAccess::administrator($r), 403);
-        abort_unless(! $m->deleted_at && $m->sender_id === null && $m->sender_name === 'Super Admin', 403);
         $v = $r->validate(['body' => 'required|string|max:10000']);
         \App\Services\CommunicationMessagePolicy::enforce($r, $v['body']);
         abort_if(trim($v['body']) === '', 422);
-        DB::table('communication_messages')->where('id', $id)->update(['body' => $v['body'], 'edited_at' => now(), 'updated_at' => now()]);
+        DB::transaction(function () use ($r, $id, $v) {
+            $m = DB::table('communication_messages')->where('id', $id)->lockForUpdate()->first();
+            abort_unless($m, 404);
+            $c = $this->conversation($r, $m->conversation_id);
+            abort_if($m->protected_payload, 422, 'Protected messages cannot be edited. Send a new protected message instead.');
+            abort_if((json_decode($c->protection ?? 'null',true)['future'] ?? false),422,'This chat protects future messages. Send a new protected message instead.');
+            abort_unless($c->kind !== 'community' || \App\Services\PlatformAccess::administrator($r), 403);
+            $own = $this->isAdmin($r) ? $m->sender_id === null && $m->sender_name === 'Super Admin' : $m->sender_id === Auth::id();
+            abort_unless(! $m->deleted_at && $own, 403, 'You can only edit your own messages.');
+            if ($m->body === $v['body']) return;
+            DB::table('communication_message_edits')->insert([
+                'message_id'=>$id,'editor_id'=>$this->isAdmin($r)?null:Auth::id(),
+                'editor_name'=>$this->isAdmin($r)?'Super Admin':Auth::user()->name,
+                'previous_body'=>\Illuminate\Support\Facades\Crypt::encryptString($m->body ?? ''),
+                'updated_body'=>\Illuminate\Support\Facades\Crypt::encryptString($v['body']), 'edited_at'=>now(),
+            ]);
+            DB::table('communication_messages')->where('id', $id)->update(['body' => $v['body'], 'edited_at' => now(), 'updated_at' => now()]);
+        });
 
         return response()->json(['message' => 'Message updated.']);
     }

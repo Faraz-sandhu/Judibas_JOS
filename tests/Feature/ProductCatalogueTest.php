@@ -40,7 +40,7 @@ class ProductCatalogueTest extends TestCase
             $this->get('/products')->assertOk()->assertViewHas('portal', fn ($portal) => $portal['productsTheme'] === $theme);
         }
         $this->postJson('/admin/api/platform-settings/products', ['theme' => 'invalid'])->assertUnprocessable();
-        $this->assertSame('disclosure', ProductCatalogue::theme());
+        $this->assertSame('stacked', ProductCatalogue::theme());
     }
 
     public function test_company_cards_follow_employee_product_and_company_assignments(): void

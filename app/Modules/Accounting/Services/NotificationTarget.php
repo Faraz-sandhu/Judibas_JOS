@@ -9,7 +9,7 @@ class NotificationTarget {
   $details=json_decode($audit->details??'{}',true)?:[];
   $subject=$audit->subject??$n->subject;
   $journal=DB::table('accounting_journals')->where('company_id',$company)->where('number',$n->subject)->first();
-  if($journal){$id=$journal->id;$section=isset(VoucherTypes::TYPES[$journal->kind])?'single-vouchers':'journals';$permission=Permissions::journalGroup($journal->kind).'.view';}
+  if($journal){$id=$journal->id;$section=ImprestFunds::movement($id)?'imprest':(isset(VoucherTypes::TYPES[$journal->kind])?'single-vouchers':'journals');$permission=$section==='imprest'?'imprest.view':Permissions::journalGroup($journal->kind).'.view';}
   else {
    $invoice=DB::table('accounting_invoices')->where('company_id',$company)->where(function($q)use($subject,$n,$details){$q->where('number',$n->subject)->orWhere('number',$details['invoice']??'');if(preg_match('/^Invoice #(\d+)$/',$subject,$m))$q->orWhere('id',(int)$m[1]);})->first();
    if($invoice){$id=$invoice->id;$section=$invoice->kind==='sale'?'sales':'purchases';$permission=$section.'.view';}

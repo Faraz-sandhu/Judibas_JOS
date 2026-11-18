@@ -11,6 +11,7 @@ class Permissions
     public static function catalog(): array
     {
         $groups = [
+            'imprest' => ['Imprest / Petty Cash', ['view','create','manage','post']],
             'overview' => ['Overview', ['view']], 'chart' => ['Chart of accounts', ['view','initialize','create','update','delete']],
             'customers' => ['Customers', ['view','create','update']], 'suppliers' => ['Suppliers', ['view','create','update']],
             'sales' => ['Sales invoices', ['view','create','update','post','reverse','print']],
@@ -40,14 +41,15 @@ class Permissions
     {
         $all = self::keys();
         $views = array_values(array_filter($all, fn ($p) => (str_ends_with($p, '.view') || str_ends_with($p, '.print') || str_starts_with($p, 'reports.')) && ! in_array($p, ['roles.view','books.view','audit.view','notifications.view','reports.export'])));
-        $finance = array_values(array_unique(array_merge($views, ['reports.export','workflow.submit','workflow.upload_signed','workflow.finance_review','workflow.finance_verify'], array_filter($all, fn ($p) => preg_match('/^(chart|customers|suppliers|sales|purchases|journals|cash_receipts|cash_payments|bank_receipts|bank_payments|expense_vouchers|income_vouchers|purchase_orders|sales_orders)\.(create|update|initialize|print)$/', $p) || $p === 'payments.create'))));
+        $finance = array_values(array_unique(array_merge($views, ['imprest.create','reports.export','workflow.submit','workflow.upload_signed','workflow.finance_review','workflow.finance_verify'], array_filter($all, fn ($p) => preg_match('/^(chart|customers|suppliers|sales|purchases|journals|cash_receipts|cash_payments|bank_receipts|bank_payments|expense_vouchers|income_vouchers|purchase_orders|sales_orders)\.(create|update|initialize|print)$/', $p) || $p === 'payments.create'))));
         return [
             'viewer' => ['Viewer', $views],
             // Preserve existing Accountant capabilities while enabling narrower custom roles.
-            'accountant' => ['Accountant', array_values(array_filter($all, fn ($p) => ! in_array($p, ['notifications.view','chart.delete','sales.reverse','purchases.reverse','payments.reverse','journals.reverse','cash_receipts.reverse','cash_payments.reverse','bank_payments.reverse','bank_receipts.reverse','expense_vouchers.reverse','income_vouchers.reverse','books.manage','roles.manage','workflow.configure','workflow.ceo_approve','workflow.finalize'])))],
+            'accountant' => ['Accountant', array_values(array_filter($all, fn ($p) => ! in_array($p, ['imprest.manage','imprest.post','notifications.view','chart.delete','sales.reverse','purchases.reverse','payments.reverse','journals.reverse','cash_receipts.reverse','cash_payments.reverse','bank_payments.reverse','bank_receipts.reverse','expense_vouchers.reverse','income_vouchers.reverse','books.manage','roles.manage','workflow.configure','workflow.ceo_approve','workflow.finalize'])))],
             'manager' => ['Accounting Manager', $all],
             'finance_officer' => ['Finance Officer', $finance],
             'senior_finance_manager' => ['Senior Finance Manager', array_values(array_diff($all, ['roles.manage','workflow.configure','workflow.ceo_approve']))],
+            'junior_finance_officer' => ['Junior Finance Officer', ['imprest.view','imprest.create','cash_payments.view','cash_payments.print','journals.view','journals.print','workflow.view','workflow.submit','workflow.upload_signed']],
             'ceo' => ['Company CEO', ['workflow.view','workflow.ceo_approve','reports.profit','reports.balance','reports.receivables','reports.payables']],
         ];
     }
@@ -58,7 +60,10 @@ class Permissions
         if (PlatformAccess::administrator($r)) return self::keys();
         $role = DB::table('accounting_members')->where('user_id', $r->user()->id)->value('role') ?? 'viewer';
         $json = DB::table('accounting_roles')->where('slug', $role)->where('active', true)->value('permissions');
-        return array_values(array_intersect(json_decode($json ?? '[]', true), self::keys()));
+
+        $keys = array_values(array_intersect(json_decode($json ?? '[]', true), self::keys()));
+        if (ImprestFunds::restricted($r)) $keys = array_values(array_intersect($keys, self::presets()['junior_finance_officer'][1]));
+        return $keys;
     }
 
     public static function can(Request $r, string $permission): bool { return in_array($permission, self::effective($r), true); }

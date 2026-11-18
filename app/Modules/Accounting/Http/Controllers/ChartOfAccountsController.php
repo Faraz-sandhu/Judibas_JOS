@@ -30,7 +30,7 @@ class ChartOfAccountsController
         $book=$company?DB::table('accounting_books')->where('company_id',$company)->first():null;
         if($book)$book=\App\Modules\Accounting\Services\GlobalPolicy::apply($book);
         if($book)$book->approval_types=\App\Modules\Accounting\Services\ApprovalPolicy::selected($book);
-        return ['can_view_all'=>\App\Services\PlatformAccess::administrator($r), 'global_policy'=>$book, 'is_super_admin'=>\App\Services\PlatformAccess::super($r), 'companies' => $companies, 'company_id' => $company ?: null, 'role' => $role, 'book' => $book, 'permissions' => \App\Modules\Accounting\Services\Permissions::effective($r), 'role_name' => DB::table('accounting_roles')->where('slug', $role)->value('name') ?? 'Accounting Manager', 'can_manage' => count(array_filter(\App\Modules\Accounting\Services\Permissions::effective($r), fn ($p) => preg_match('/\.(create|update|post)$/', $p))) > 0, 'can_delete' => \App\Modules\Accounting\Services\Permissions::can($r, 'chart.delete'), 'account_types' => self::TYPES, 'accounts' => $company ? (\App\Modules\Accounting\Services\Permissions::can($r, 'chart.view') ? ChartSummary::accounts($company) : DB::table('accounting_accounts')->where('company_id', $company)->orderBy('code')->get(['id','company_id','parent_id','code','name','root_type','account_type','is_group','is_system','active','version','description','currency'])) : []];
+        return ['can_view_all'=>\App\Services\PlatformAccess::administrator($r), 'global_policy'=>$book, 'is_super_admin'=>\App\Services\PlatformAccess::super($r), 'companies' => $companies, 'company_id' => $company ?: null, 'role' => $role, 'book' => $book, 'permissions' => \App\Modules\Accounting\Services\Permissions::effective($r), 'role_name' => DB::table('accounting_roles')->where('slug', $role)->value('name') ?? 'Accounting Manager', 'can_manage' => count(array_filter(\App\Modules\Accounting\Services\Permissions::effective($r), fn ($p) => preg_match('/\.(create|update|post)$/', $p))) > 0, 'can_delete' => \App\Modules\Accounting\Services\Permissions::can($r, 'chart.delete'), 'account_types' => self::TYPES, 'accounts' => \App\Modules\Accounting\Services\ImprestFunds::tagAccounts($company ? (\App\Modules\Accounting\Services\Permissions::can($r, 'chart.view') ? ChartSummary::accounts($company) : DB::table('accounting_accounts')->where('company_id', $company)->orderBy('code')->get(['id','company_id','parent_id','code','name','root_type','account_type','is_group','is_system','active','version','description','currency'])) : collect())];
     }
 
     private function lock(int $company): void
@@ -58,6 +58,7 @@ class ChartOfAccountsController
                     }
                 }
             }
+            \App\Modules\Accounting\Services\DefaultAssetGroups::ensureNonCurrentAssets($company);
             Access::audit($r, $company, 'Chart initialized', 'Starter chart of accounts');
         });
 
@@ -83,6 +84,7 @@ class ChartOfAccountsController
             $old = isset($v['id']) ? (clone $q)->where('id', $v['id'])->first() : null;
             abort_if(isset($v['id']) && ! $old, 404);
             abort_if($old && $old->version !== (int) ($v['version'] ?? 0), 409, 'This account was changed by another person. Close this form and reopen the account before saving.');
+            abort_if($old && \App\Modules\Accounting\Services\ImprestFunds::protectedAccount($old->id),422,'Officer fund ledger accounts are managed through Imprest / Petty Cash.');
             abort_if($old?->is_system, 422, 'Root groups are protected. Add or edit accounts beneath them.');
             $parent = (clone $q)->where('id', $v['parent_id'])->first();
             abort_unless($parent && $parent->is_group, 422, 'Choose a group in this company as the parent.');
@@ -136,6 +138,7 @@ class ChartOfAccountsController
             $this->lock($company);
             $account = DB::table('accounting_accounts')->where('company_id', $company)->where('id', $id)->first();
             abort_unless($account, 404);
+            abort_if(\App\Modules\Accounting\Services\ImprestFunds::protectedAccount($id),422,'Officer fund accounts cannot be deleted. Their custody history must be retained.');
             abort_if($account->version !== (int) $v['version'], 409, 'This account was changed by another person. Close this form and reopen the account before deleting.');
             abort_if(DB::table('accounting_journal_lines')->where('account_id', $id)->exists(), 422, 'This account is referenced by a journal. Deactivate it instead of deleting it.');
             abort_if(DB::table('accounting_cash_basis_review_lines')->where('company_id', $company)->where('account_id', $id)->exists(), 422, 'This account is used in a cash-basis allocation. Deactivate it instead of deleting it.');

@@ -9,7 +9,7 @@ import AccountingApprovalPanel from './AccountingApprovalPanel.vue';
 import AdminDialog from '../../AdminDialog.vue';
 import {useAccountingPermissions} from './permissions';
 import {requestKey} from './requestKey';
-const props=defineProps<{company:number;book:any;accounts:any[];csrf?:string;openId?:number}>(),emit=defineEmits(['notice']);
+const props=defineProps<{company:number;book:any;accounts:any[];csrf?:string;openId?:number}>(),emit=defineEmits(['notice','imprest']);
 const can=useAccountingPermissions();
 const types=[{kind:'cash_payment',code:'CPV',name:'Cash payment',group:'cash_payments',settlement:'Cash',receipt:false},{kind:'cash_receipt',code:'CRV',name:'Cash receipt',group:'cash_receipts',settlement:'Cash',receipt:true},{kind:'bank_payment',code:'BPV',name:'Bank payment',group:'bank_payments',settlement:'Bank',receipt:false},{kind:'bank_receipt',code:'BRV',name:'Bank receipt',group:'bank_receipts',settlement:'Bank',receipt:true},{kind:'expense',code:'EV',name:'Expense voucher',group:'expense_vouchers',settlement:null,receipt:false},{kind:'income',code:'IV',name:'Income voucher',group:'income_vouchers',settlement:null,receipt:true}];
 const visibleTypes=computed(()=>types.filter(t=>can(t.group+'.view'))),createTypes=computed(()=>visibleTypes.value.filter(t=>can(t.group+'.create')));
@@ -19,7 +19,7 @@ const requiresApproval=computed(()=>needsApproval(props.book,editor.value?.kind|
 const spec=computed(()=>types.find(t=>t.kind===editor.value?.kind)||types[0]);
 const pending=computed(()=>editor.value?.approval&&!['returned','withdrawn'].includes(editor.value.approval.stage));
 const editable=computed(()=>editor.value?.status==='draft'&&!pending.value&&can(spec.value.group+(editor.value.id?'.update':'.create')));
-const ledgers=computed(()=>props.accounts.filter(a=>a.active&&!a.is_group&&!['Receivable','Payable'].includes(a.account_type)));
+const ledgers=computed(()=>props.accounts.filter(a=>!a.imprest_fund&&a.active&&!a.is_group&&!['Receivable','Payable'].includes(a.account_type)));
 const settlements=computed(()=>ledgers.value.filter(a=>spec.value.settlement?a.root_type==='Asset'&&a.account_type===spec.value.settlement:['Asset','Liability'].includes(a.root_type)));
 const offsets=computed(()=>ledgers.value.filter(a=>!['Cash','Bank'].includes(a.account_type)&&(spec.value.settlement||a.root_type===(spec.value.receipt?'Income':'Expense'))));
 const minor=(v:any)=>{const text=String(v||'0');if(!/^\d{1,10}(\.\d{1,2})?$/.test(text))return 0;const [whole,fraction='']=text.split('.');return Number(whole)*100+Number(fraction.padEnd(2,'0'));};
@@ -32,7 +32,7 @@ function accountName(id:number){const a=props.accounts.find(a=>a.id===id);return
 async function api(path:string,body?:any){const r=await fetch('/accounting/api/'+path,{method:body?'POST':'GET',headers:{Accept:'application/json','Content-Type':'application/json','X-CSRF-TOKEN':props.csrf||''},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(Object.values(d.errors||{}).flat().join(' ')||d.message||'Unable to complete this action.');return d;}
 async function load(){const gen=++generation;loading.value=true;error.value='';try{const q=new URLSearchParams({company_id:String(props.company),vouchers:'1',page:String(page.value),status:status.value,search:search.value});if(kind.value)q.set('kind',kind.value);const d=await api('journals?'+q);if(gen===generation)records.value=d;}catch(e){if(gen===generation)error.value=(e as Error).message;}finally{if(gen===generation)loading.value=false;}}
 function hydrate(j:any){const type=types.find(t=>t.kind===j.kind)!;const settlement=j.lines.find((l:any)=>type.settlement?props.accounts.find(a=>a.id===l.account_id)?.account_type===type.settlement:Number(type.receipt?l.debit:l.credit)>0);return {...j,settlement_id:settlement?.account_id||'',details:j.lines.filter((l:any)=>l!==settlement).map((l:any)=>({account_id:l.account_id,description:l.description||'',amount:type.receipt?l.credit:l.debit}))};}
-async function open(id:number){formError.value='';try{editor.value=hydrate((await api('journals?company_id='+props.company+'&id='+id)).journal);saved.value=signature(editor.value);}catch(e){error.value=(e as Error).message;}}
+async function open(id:number){formError.value='';try{const j=(await api('journals?company_id='+props.company+'&id='+id)).journal;if(j.imprest){emit('imprest',j.id);return;}editor.value=hydrate(j);saved.value=signature(editor.value);}catch(e){error.value=(e as Error).message;}}
 function create(){editor.value={kind:createTypes.value[0]?.kind,status:'draft',request_key:requestKey(),currency:props.book?.currency||'PKR',exchange_rate:'1.000000',posting_date:today,voucher_person:'',reference:'',remarks:'',settlement_id:'',details:[{account_id:'',description:'',amount:''}]};saved.value='';formError.value='';}
 function changeType(){editor.value.settlement_id='';editor.value.details=[{account_id:'',description:'',amount:''}];}
 async function run(action:string){if(busy.value)return;if(action==='post'&&unsaved.value){formError.value='Save all changes before posting.';return;}busy.value=true;formError.value='';try{let d;const e=editor.value;if(action==='save'){

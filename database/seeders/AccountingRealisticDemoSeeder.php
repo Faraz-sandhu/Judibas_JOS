@@ -29,7 +29,6 @@ class AccountingRealisticDemoSeeder extends AccountingDemoSeeder
                 ['01-01', 'Prepaid Rent', 'General'],
                 ['01-01', 'Employee Advances', 'General'],
                 ['01-01', 'Security Deposits', 'General'],
-                ['01', 'Non-current Assets', null],
                 ['01-02', 'Office Equipment', 'Fixed Asset'],
                 ['01-02', 'Computers and Laptops', 'Fixed Asset'],
                 ['01-02', 'Furniture and Fixtures', 'Fixed Asset'],

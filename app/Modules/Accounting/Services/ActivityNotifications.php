@@ -29,8 +29,8 @@ class ActivityNotifications
         if($action==='Approval post')return; // The underlying financial posting already records its notification.
         $section='audit';$display=$subject;
         $journalId=preg_match('/^Journal #(\d+)$/',$subject,$m)?(int)$m[1]:null;
-        $journal=DB::table('accounting_journals')->where('company_id',$company)->when($journalId,fn($q)=>$q->where('id',$journalId),fn($q)=>$q->where('number',$subject))->first(['kind','number']);
-        if($journal){$section=isset(VoucherTypes::TYPES[$journal->kind])?'single-vouchers':'journals';$display=$journal->number;}
+        $journal=DB::table('accounting_journals')->where('company_id',$company)->when($journalId,fn($q)=>$q->where('id',$journalId),fn($q)=>$q->where('number',$subject))->first(['id','kind','number']);
+        if($journal){$section=ImprestFunds::movement($journal->id)?'imprest':(isset(VoucherTypes::TYPES[$journal->kind])?'single-vouchers':'journals');$display=$journal->number;}
         elseif(preg_match('/^IC-(\d+)$/',$subject,$orderMatch)){ $order=DB::table('accounting_intercompany_orders')->find((int)$orderMatch[1]);if($order){$section=(int)$order->buyer_company_id===$company?'purchase-orders':'sales-orders';}}
         elseif(str_contains(strtolower($action),'role'))$section='roles';
         elseif(str_contains(strtolower($action),'books'))$section='books';

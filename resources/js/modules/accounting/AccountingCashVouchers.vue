@@ -10,14 +10,14 @@ import AccountingDocument from './AccountingDocument.vue';
 import AdminDialog from '../../AdminDialog.vue';
 import {requestKey} from './requestKey';
 const props=defineProps<{kind:'cash_receipt'|'cash_payment';company:number;book:any;accounts:any[];canManage:boolean;canAdmin:boolean;csrf?:string}>();
-const emit=defineEmits(['notice','changed','setup','single']);
+const emit=defineEmits(['notice','changed','setup','single','imprest']);
 const requiresApproval=computed(()=>needsApproval(props.book,props.kind));
 const receipt=computed(()=>props.kind==='cash_receipt'),title=computed(()=>receipt.value?'Cash receipt vouchers':'Cash payment vouchers');
 const today=new Date().toLocaleDateString('en-CA'),data=ref<any>(null),editor=ref<any>(null),page=ref(1),status=ref(''),search=ref(''),loading=ref(false),busy=ref(false),error=ref(''),formError=ref(''),confirm=ref(''),reason=ref(''),reverseDate=ref(today);
-const cash=computed(()=>props.accounts.filter(a=>a.active&&!a.is_group&&a.root_type==='Asset'&&a.account_type==='Cash'));
+const cash=computed(()=>props.accounts.filter(a=>!a.imprest_fund&&a.active&&!a.is_group&&a.root_type==='Asset'&&a.account_type==='Cash'));
 const quickEntry=ref(false);
 const quickRoot=computed(()=>receipt.value?'Income':'Expense');
-const offsets=computed(()=>props.accounts.filter(a=>a.active&&!a.is_group&&(!quickEntry.value||a.root_type===quickRoot.value)&&!['Cash','Bank','Receivable','Payable'].includes(a.account_type)));
+const offsets=computed(()=>props.accounts.filter(a=>!a.imprest_fund&&a.active&&!a.is_group&&(!quickEntry.value||a.root_type===quickRoot.value)&&!['Cash','Bank','Receivable','Payable'].includes(a.account_type)));
 const savedSignature=ref('');
 function signature(e:any){return JSON.stringify([e.currency,e.exchange_rate,e.posting_date,e.voucher_person,e.reference||'',e.remarks||'',e.cash_id,e.offset_id,String(e.amount)]);}
 function review(){formError.value='';if(signature(editor.value)!==savedSignature.value){formError.value='Save the draft changes before reviewing posting.';return;}confirm.value='post';}
@@ -32,7 +32,7 @@ async function load(){const gen=++generation;loading.value=true;error.value='';t
 watch(()=>[props.kind,props.company],()=>{editor.value=null;page.value=1;void load();},{immediate:true});
 function create(shortcut=false){quickEntry.value=shortcut;formError.value='';editor.value={request_key:requestKey(),currency:props.book?.currency||'PKR',exchange_rate:'1.000000',posting_date:today,status:'draft',voucher_person:'',reference:'',remarks:'',cash_id:'',offset_id:'',amount:''};}
 function hydrate(j:any){const c=j.lines.find((l:any)=>props.accounts.find(a=>a.id===l.account_id)?.account_type==='Cash');const other=j.lines.filter((l:any)=>l!==c);return {...j,cash_id:c?.account_id||'',offset_id:other[0]?.account_id||'',amount:j.currency&&j.currency!==props.book?.currency?String(Number(c?.debit||0)+Number(c?.credit||0)):j.total};}
-async function view(row:any){if(row.lines?.length>2){emit('single',row.id);return;}quickEntry.value=false;formError.value='';try{editor.value=hydrate((await api('journals?company_id='+props.company+'&id='+row.id)).journal);savedSignature.value=signature(editor.value);}catch(e){error.value=(e as Error).message;}}
+async function view(row:any){if(row.lines?.length>2){emit('single',row.id);return;}quickEntry.value=false;formError.value='';try{const j=(await api('journals?company_id='+props.company+'&id='+row.id)).journal;if(j.imprest){emit('imprest',j.id);return;}editor.value=hydrate(j);savedSignature.value=signature(editor.value);}catch(e){error.value=(e as Error).message;}}
 function accountName(id:number){const a=props.accounts.find(a=>a.id===id);return a?a.code+' - '+a.name:'Account unavailable';}
 async function run(action:string){if(busy.value)return;if(action==='post'&&signature(editor.value)!==savedSignature.value){formError.value='Save the draft changes before posting.';return;}busy.value=true;formError.value='';try{let result;if(action==='save'){const e=editor.value;result=await api('journals',{company_id:props.company,id:e.id,version:e.version,request_key:e.request_key,currency:e.currency||props.book?.currency,exchange_rate:e.exchange_rate||'1.000000',posting_date:e.posting_date,kind:props.kind,voucher_person:e.voucher_person,reference:e.reference,remarks:e.remarks,lines:[{account_id:e.cash_id,debit:receipt.value?e.amount:'0.00',credit:receipt.value?'0.00':e.amount},{account_id:e.offset_id,debit:receipt.value?'0.00':e.amount,credit:receipt.value?e.amount:'0.00'}]});}else if(action==='post')result=await api('journals/'+editor.value.id+'/post',{company_id:props.company,version:editor.value.version});else result=await api('journals/'+editor.value.id+'/reverse',{company_id:props.company,version:editor.value.version,posting_date:reverseDate.value,reason:reason.value});confirm.value='';if(action==='reverse')editor.value=hydrate((await api('journals?company_id='+props.company+'&id='+editor.value.id)).journal);else editor.value=hydrate(result.journal);savedSignature.value=signature(editor.value);emit('notice',result.message);await load();emit('changed');}catch(e){formError.value=(e as Error).message;}finally{busy.value=false;}}
 </script>

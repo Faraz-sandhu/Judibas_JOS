@@ -44,6 +44,11 @@ class SignedCopyController
     {
         $company=(int)$r->validate(['company_id'=>'required|integer'])['company_id'];Access::company($r,$company,'workflow.view');
         $copy=DB::table('accounting_signed_copies')->where('company_id',$company)->where('id',$id)->first();abort_unless($copy,404);
+        $approval=DB::table('accounting_approvals')->find($copy->approval_id);
+        if (\App\Modules\Accounting\Services\ImprestFunds::restricted($r)) {
+            abort_unless($approval&&$approval->document_type==='journal',403);
+            \App\Modules\Accounting\Services\ImprestFunds::authorizeJournal($r,$company,$approval->document_id);
+        }
         abort_unless(Storage::disk('local')->exists($copy->path),404,'This signed copy is unavailable. Upload a new copy after returning the voucher.');
         Access::audit($r,$company,'Signed voucher copy viewed','Signed copy #'.$id,['approval_id'=>$copy->approval_id]);
         $headers=['Cache-Control'=>'private, no-store','X-Content-Type-Options'=>'nosniff','Content-Security-Policy'=>"frame-ancestors 'self'"];

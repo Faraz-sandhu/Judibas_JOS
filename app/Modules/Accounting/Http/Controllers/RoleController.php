@@ -35,7 +35,7 @@ class RoleController
             $name=trim($v['name']);abort_if($name==='',422,'Enter a role name.');
             foreach($v['permissions'] as $permission){
                 [$group,$action]=explode('.',$permission);
-                if($action!=='view'&&in_array($group,['chart','customers','suppliers','sales','purchases','payments','journals','cash_receipts','cash_payments','bank_payments','bank_receipts','expense_vouchers','income_vouchers','roles','workflow','books','cash_reviews','purchase_orders','sales_orders']))abort_unless(in_array($group.'.view',$v['permissions']),422,'Enable View for '.$group.' before granting its actions.');
+                if($action!=='view'&&in_array($group,['imprest','chart','customers','suppliers','sales','purchases','payments','journals','cash_receipts','cash_payments','bank_payments','bank_receipts','expense_vouchers','income_vouchers','roles','workflow','books','cash_reviews','purchase_orders','sales_orders']))abort_unless(in_array($group.'.view',$v['permissions']),422,'Enable View for '.$group.' before granting its actions.');
             }
             $values=['name'=>$name,'description'=>$v['description']??null,'permissions'=>json_encode($v['permissions']),'active'=>$v['active'],'version'=>($old->version??0)+1,'updated_at'=>now()];
             if($old){DB::table('accounting_roles')->where('id',$old->id)->update($values);$id=$old->id;}

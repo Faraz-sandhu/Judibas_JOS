@@ -13,6 +13,7 @@ class TradeDocuments
         $a = DB::table('accounting_accounts')->where('company_id', $company)->where('id', $id)->first();
         abort_unless($a && $a->active && ! $a->is_group && (! $types || in_array($a->account_type, $types)) && (! $roots || in_array($a->root_type, $roots)), 422, 'Choose an active account with the correct type in this company.');
 
+        abort_if(ImprestFunds::protectedAccount($a->id),422,'Use Imprest / Petty Cash for officer fund transactions.');
         return $a;
     }
 

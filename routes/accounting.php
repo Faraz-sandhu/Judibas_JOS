@@ -19,7 +19,14 @@ return app(PortalController::class)->index($r, 'accounts');
 Route::get('/accounting/journals/{id}/print', [\App\Modules\Accounting\Http\Controllers\JournalController::class, 'printJournal'])->whereNumber('id');
 Route::get('/accounting/vouchers/{id}/print', [\App\Modules\Accounting\Http\Controllers\JournalController::class, 'printVoucher'])->whereNumber('id');
 Route::get('/accounting/invoices/{id}/print', [\App\Modules\Accounting\Http\Controllers\TradeController::class, 'printInvoice'])->whereNumber('id');
-Route::prefix('accounting/api')->group(function () {
+Route::prefix('accounting/api')->middleware(\App\Modules\Accounting\Http\Middleware\RestrictImprestOfficer::class)->group(function () {
+    Route::get('imprest', [\App\Modules\Accounting\Http\Controllers\ImprestController::class,'index']);
+    Route::get('imprest/{id}', [\App\Modules\Accounting\Http\Controllers\ImprestController::class,'show'])->whereNumber('id');
+    Route::post('imprest/funds', [\App\Modules\Accounting\Http\Controllers\ImprestController::class,'createFund']);
+    Route::post('imprest/allocate', [\App\Modules\Accounting\Http\Controllers\ImprestController::class,'allocate']);
+    Route::post('imprest/spend', [\App\Modules\Accounting\Http\Controllers\ImprestController::class,'spend']);
+    Route::post('imprest/{id}/post', [\App\Modules\Accounting\Http\Controllers\ImprestController::class,'post'])->whereNumber('id');
+    Route::post('imprest/{id}/cancel', [\App\Modules\Accounting\Http\Controllers\ImprestController::class,'cancel'])->whereNumber('id');
     Route::get('currencies', [\App\Modules\Accounting\Http\Controllers\CurrencyController::class,'index']);
     Route::post('currencies', [\App\Modules\Accounting\Http\Controllers\CurrencyController::class,'save']);
     Route::get('orders', [\App\Modules\Accounting\Http\Controllers\OrderController::class,'index']);
