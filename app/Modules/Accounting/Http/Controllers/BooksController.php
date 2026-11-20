@@ -10,7 +10,7 @@ class BooksController
 {
     public function save(Request $r)
     {
-        $v = $r->validate(['expense_open_time'=>'sometimes|required|date_format:H:i', 'expense_close_time'=>'sometimes|required|date_format:H:i', 'company_id' => 'required|integer', 'version' => 'required|integer|min:0', 'currency' => 'required|in:PKR,USD,EUR,GBP,AED,SAR,CAD,AUD', 'start_date' => 'required|date_format:Y-m-d|before_or_equal:today', 'approval_required' => 'sometimes|boolean', 'approval_types'=>'sometimes|array|max:12','approval_types.*'=>['required','string','distinct',\Illuminate\Validation\Rule::in(array_keys(ApprovalPolicy::TYPES))], 'locked_through' => 'nullable|date_format:Y-m-d|after_or_equal:start_date|before_or_equal:today']);
+        $v = $r->validate(['expense_open_time'=>'sometimes|required|date_format:H:i', 'expense_close_time'=>'sometimes|required|date_format:H:i', 'company_id' => 'required|integer', 'version' => 'required|integer|min:0', 'currency' => 'required|in:PKR,USD,EUR,GBP,AED,SAR,CAD,AUD', 'start_date' => 'required|date_format:Y-m-d|before_or_equal:today', 'approval_required' => 'sometimes|boolean', 'approval_types'=>'sometimes|array|max:13','approval_types.*'=>['required','string','distinct',\Illuminate\Validation\Rule::in(array_keys(ApprovalPolicy::TYPES))], 'locked_through' => 'nullable|date_format:Y-m-d|after_or_equal:start_date|before_or_equal:today']);
         $company = (int) $v['company_id'];
         Access::company($r, $company, 'books.manage');
         DB::transaction(function () use ($r, $v, $company) {
@@ -25,6 +25,7 @@ class BooksController
             if($open!==($global->expense_open_time??'11:00')||$close!==($global->expense_close_time??'20:00'))
                 abort_unless(\App\Services\PlatformAccess::super($r),403,'Only Super Admin can change expense voucher hours.');
             $hasEntries = DB::table('accounting_journals')->where('company_id',$company)->exists() || DB::table('accounting_invoices')->where('company_id',$company)->exists() || DB::table('accounting_intercompany_orders')->where(fn($q)=>$q->where('buyer_company_id',$company)->orWhere('seller_company_id',$company))->exists() || DB::table('accounting_exchange_rates')->where('company_id',$company)->exists();
+            abort_if($old&&$old->currency!==$v['currency']&&DB::table('accounting_items')->where('company_id',$company)->exists(),422,'Base currency cannot change after catalogue rates have been configured.');
             abort_if($old && $hasEntries && ($old->currency !== $v['currency'] || $old->start_date !== $v['start_date']), 422, 'Currency and start date cannot change after accounting documents or exchange rates have been created.');
             abort_if($old?->locked_through && (! $r->filled('locked_through') || $v['locked_through'] < $old->locked_through), 422, 'A closed period cannot be reopened from these settings.');
             $enabled=(bool)($v['approval_required']??$global->approval_required??true);

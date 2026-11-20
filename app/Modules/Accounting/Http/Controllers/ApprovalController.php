@@ -15,14 +15,14 @@ class ApprovalController
         $events=DB::table('accounting_approval_events')->where('approval_id',$approval->id)->orderBy('id')->get();
         $permission=Flow::PERMISSIONS[$approval->stage]??null;
         $paper=$approval->workflow_mode==='paper';$copy=$paper?Flow::signedCopy($approval):null;
-        $copies=DB::table('accounting_signed_copies')->where('company_id',$approval->company_id)->where('approval_id',$approval->id)->orderByDesc('id')->get(['id','original_name','mime','size','uploaded_name','created_at','document_version','submission_version'])->map(fn($c)=>(array)$c+['url'=>'/accounting/api/signed-copies/'.$c->id.'?company_id='.$approval->company_id,'current'=>$c->submission_version===$approval->submission_version&&$c->document_version===$approval->document_version]);
+        $copies=DB::table('accounting_signed_copies')->where('company_id',$approval->company_id)->where('approval_id',$approval->id)->orderByDesc('id')->get(['id','original_name','mime','size','uploaded_name','created_at','document_version','submission_version'])->map(fn($c)=>(array)$c+['url'=>'/accounting/api/signed-copies/'.$c->id.'?company_id='.$approval->company_id,'current'=>$copy&&$c->id===$copy->id]);
         $samePreparer=$r->user()?->id&&$approval->prepared_by===$r->user()->id;
         $sameCeo=$r->user()?->id&&$approval->ceo_by===$r->user()->id;
         $sameUploader=$copy&&$r->user()?->id&&$copy->uploaded_by===$r->user()->id;
         $separation=PlatformAccess::administrator($r)||(!($samePreparer&&in_array($approval->stage,['finance_review','ceo_review','manager_review']))&&!($sameCeo&&$approval->stage==='manager_review')&&!($paper&&$sameUploader&&$approval->stage==='manager_review'));
         $canAct=$approval->stage!=='paper_ceo'&&(!$paper||$copy)&&$permission&&Permissions::can($r,$permission)&&$separation&&($approval->stage!=='manager_review'||Permissions::can($r,$document['permission'].'.post'));
         return (array)$approval+['stage_label'=>$paper&&$approval->stage==='manager_review'?'Finance Head verification':(Flow::STAGES[$approval->stage]??$approval->stage),'document'=>$document['detail'],'events'=>$events,
-            'signed_copies'=>$copies,'can_upload_signed'=>$paper&&$approval->stage==='paper_ceo'&&Permissions::can($r,'workflow.upload_signed'),'can_approve'=>(bool)$canAct,'can_return'=>(bool)($permission&&Permissions::can($r,$permission)),
+            'signed_copies'=>$copies,'can_upload_signed'=>$paper&&in_array($approval->stage,['paper_ceo','manager_review'],true)&&Permissions::can($r,'workflow.upload_signed'),'can_approve'=>(bool)$canAct,'can_return'=>(bool)($permission&&Permissions::can($r,$permission)),
             'can_withdraw'=>in_array($approval->stage,array_keys(Flow::PERMISSIONS))&&(PlatformAccess::administrator($r)||($samePreparer&&Permissions::can($r,'workflow.submit'))),
             'separation_notice'=>$permission&&!$separation?'The preparer or person who uploaded the signed copy cannot perform final verification. A different Finance Head must review it.':null];
     }

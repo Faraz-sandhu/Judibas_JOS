@@ -66,7 +66,10 @@ class AccountingApprovalTest extends TestCase
         $this->assertSame('manager_review',$a->stage);
         $this->assertSame('draft',DB::table('accounting_journals')->find($j['id'])->status);
         $this->decision($a,'post')->assertForbidden();
-        $this->attach($a)->assertConflict();
+        $stale=$a;
+        $this->attach($a)->assertOk();$a=$this->latest($a);
+        $this->attach($stale)->assertConflict();
+        $this->assertSame(2,DB::table('accounting_signed_copies')->where('approval_id',$a->id)->count());
         $this->asUser($manager);
         $this->decision($a,'post',false)->assertUnprocessable();
         $this->decision($a,'post')->assertOk();
@@ -75,7 +78,7 @@ class AccountingApprovalTest extends TestCase
         $this->assertNotNull($posted->verified_copy_id);
         $this->assertSame($manager->id,$posted->verified_by);
         $this->assertSame('posted',DB::table('accounting_journals')->find($j['id'])->status);
-        $this->assertSame(3,DB::table('accounting_approval_events')->where('approval_id',$a->id)->count());
+        $this->assertSame(4,DB::table('accounting_approval_events')->where('approval_id',$a->id)->count());
         $this->decision($posted,'post')->assertConflict();
     }
 
@@ -153,6 +156,27 @@ class AccountingApprovalTest extends TestCase
         $a=DB::table('accounting_approvals')->where('company_id',$this->company)->where('document_type','payment')->first();
         $this->finish($a);
         $this->getJson('/accounting/api/invoices?company_id='.$this->company.'&id='.$i['id'])->assertOk()->assertJsonPath('invoice.outstanding','20.00')->assertJsonPath('invoice.paid','80.00');
+        $this->assertSame(1,DB::table('accounting_payments')->where('company_id',$this->company)->count());
+    }
+
+    public function test_pdc_clearance_waits_for_payment_approval_and_updates_register_after_posting(): void
+    {
+        $party=DB::table('accounting_parties')->insertGetId(['company_id'=>$this->company,'kind'=>'customer','name'=>'Approval customer','active'=>true,'created_at'=>now(),'updated_at'=>now()]);
+        $i=$this->postJson('/accounting/api/invoices',['company_id'=>$this->company,'request_key'=>(string)Str::uuid(),'kind'=>'sale','party_id'=>$party,'control_account_id'=>$this->accounts['01-01-03'],'posting_date'=>now()->toDateString(),'due_date'=>now()->addDays(10)->toDateString(),'tax_percent'=>'0.00','lines'=>[['description'=>'Service','account_id'=>$this->accounts['04-01'],'quantity'=>'1.00','rate'=>'100.00']]])->assertOk()->json('invoice');
+        $this->postJson('/accounting/api/invoices/'.$i['id'].'/post',['company_id'=>$this->company,'version'=>1])->assertUnprocessable();
+        $this->postJson('/accounting/api/approvals/submit',['company_id'=>$this->company,'type'=>'invoice','id'=>$i['id'],'version'=>1,'note'=>'Please approve this invoice.'])->assertOk();
+        $a=DB::table('accounting_approvals')->where('document_type','invoice')->where('document_id',$i['id'])->first();
+        $this->assertSame(0,DB::table('accounting_journals')->where('company_id',$this->company)->where('status','posted')->count());
+        $this->finish($a);
+        $this->assertSame('posted',DB::table('accounting_invoices')->find($i['id'])->status);
+        $this->postJson('/accounting/api/cheques',['company_id'=>$this->company,'request_key'=>(string)Str::uuid(),'invoice_id'=>$i['id'],'bank_account_id'=>$this->accounts['01-01-02'],'cheque_number'=>'PDC-APPROVAL','drawee_bank'=>'MCB','recorded_date'=>now()->toDateString(),'cheque_date'=>now()->toDateString(),'amount'=>'80.00'])->assertOk();
+        $c=DB::table('accounting_cheques')->where('invoice_id',$i['id'])->first();
+        $this->postJson('/accounting/api/cheques/'.$c->id.'/actions',['company_id'=>$this->company,'version'=>1,'action'=>'clear','date'=>now()->toDateString(),'note'=>'Actual bank clearance confirmed'])->assertOk();
+        $this->assertSame('clearing',DB::table('accounting_cheques')->find($c->id)->status);
+        $this->assertSame(0,DB::table('accounting_payments')->where('company_id',$this->company)->count());
+        $approval=DB::table('accounting_approvals')->where('company_id',$this->company)->where('document_type','payment')->first();
+        $this->finish($approval);
+        $this->assertSame('cleared',DB::table('accounting_cheques')->find($c->id)->status);
         $this->assertSame(1,DB::table('accounting_payments')->where('company_id',$this->company)->count());
     }
 

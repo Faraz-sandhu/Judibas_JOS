@@ -42,7 +42,7 @@ class OrderController
         $invoiceId = $kind === 'sale' ? $o->sales_invoice_id : $o->purchase_invoice_id;
         $ids = Access::companies($r)->pluck('id')->all();
 
-        return ['id' => $o->id, 'number' => ($kind === 'sale' ? 'SO-' : 'PO-').str_pad((string) $o->id, 7, '0', STR_PAD_LEFT), 'reference' => 'IC-'.str_pad((string) $o->id, 7, '0', STR_PAD_LEFT), 'kind' => $kind, 'company_id' => $company, 'seller_company_id' => $o->seller_company_id, 'buyer_company_id' => $o->buyer_company_id, 'counterparty' => DB::table('communication_companies')->where('id', $other)->value('name'), 'party_id' => $kind === 'sale' ? $o->customer_id : $o->supplier_id, 'order_date' => $o->order_date, 'due_date' => $o->due_date, 'currency' => $o->currency, 'status' => $o->status, 'version' => $o->version, 'lines' => json_decode($o->lines, true), 'quoted' => Ledger::money($o->quoted_minor), 'total' => Ledger::money($o->total_minor), 'discount' => Ledger::money($o->quoted_minor - $o->total_minor), 'terms' => $o->terms, 'invoice_id' => Permissions::can($r, ($kind === 'sale' ? 'sales' : 'purchases').'.view') ? $invoiceId : null, 'invoice_status' => $invoiceId ? DB::table('accounting_invoices')->where('id', $invoiceId)->value('status') : null, 'can_manage_pair' => in_array($o->seller_company_id, $ids) && in_array($o->buyer_company_id, $ids)];
+        return ['customer_account_id'=>DB::table('accounting_parties')->where('id',$o->customer_id)->value('account_id'),'supplier_account_id'=>DB::table('accounting_parties')->where('id',$o->supplier_id)->value('account_id'),'id' => $o->id, 'number' => ($kind === 'sale' ? 'SO-' : 'PO-').str_pad((string) $o->id, 7, '0', STR_PAD_LEFT), 'reference' => 'IC-'.str_pad((string) $o->id, 7, '0', STR_PAD_LEFT), 'kind' => $kind, 'company_id' => $company, 'seller_company_id' => $o->seller_company_id, 'buyer_company_id' => $o->buyer_company_id, 'counterparty' => DB::table('communication_companies')->where('id', $other)->value('name'), 'party_id' => $kind === 'sale' ? $o->customer_id : $o->supplier_id, 'order_date' => $o->order_date, 'due_date' => $o->due_date, 'currency' => $o->currency, 'status' => $o->status, 'version' => $o->version, 'lines' => json_decode($o->lines, true), 'quoted' => Ledger::money($o->quoted_minor), 'total' => Ledger::money($o->total_minor), 'discount' => Ledger::money($o->quoted_minor - $o->total_minor), 'terms' => $o->terms, 'invoice_id' => Permissions::can($r, ($kind === 'sale' ? 'sales' : 'purchases').'.view') ? $invoiceId : null, 'invoice_status' => $invoiceId ? DB::table('accounting_invoices')->where('id', $invoiceId)->value('status') : null, 'can_manage_pair' => in_array($o->seller_company_id, $ids) && in_array($o->buyer_company_id, $ids)];
     }
 
     public function index(Request $r)
@@ -78,7 +78,7 @@ class OrderController
         $companies = Access::companies($r)->map(function ($c) use ($r) {
             $book = DB::table('accounting_books')->where('company_id', $c->id)->first();
 
-            return ['id' => $c->id, 'name' => $c->name, 'currency' => $book?->currency, 'accounts' => Permissions::can($r, 'sales.create') && Permissions::can($r, 'purchases.create') ? DB::table('accounting_accounts')->where('company_id', $c->id)->where('active', true)->where('is_group', false)->get(['id', 'code', 'name', 'root_type', 'account_type']) : []];
+            return ['id' => $c->id, 'name' => $c->name, 'currency' => $book?->currency, 'cost_account_ids' => \App\Modules\Accounting\Services\PurchaseOrderAccounts::ids($c->id), 'accounts' => Permissions::can($r, 'sales.create') && Permissions::can($r, 'purchases.create') ? DB::table('accounting_accounts')->where('company_id', $c->id)->where('active', true)->where('is_group', false)->get(['id', 'code', 'name', 'root_type', 'account_type']) : []];
         });
 
         return ['companies' => $companies];
@@ -91,12 +91,14 @@ class OrderController
             $party = DB::table('accounting_parties')->where('id', $map->party_id)->where('company_id', $company)->where('kind', $kind)->where('active', true)->first();
             abort_unless($party, 422, 'The linked customer/supplier is inactive or invalid.');
 
+            \App\Modules\Accounting\Services\PartyAccounts::sync($company,$party->id);
             return $party->id;
         }
         Permissions::require($r, ($kind === 'customer' ? 'customers' : 'suppliers').'.create');
         $name = DB::table('communication_companies')->where('id', $other)->value('name');
         // Never silently attach an existing same-name contact to a legal company.
         $id = DB::table('accounting_parties')->insertGetId(['company_id' => $company, 'kind' => $kind, 'name' => $name, 'active' => true, 'version' => 1, 'created_at' => now(), 'updated_at' => now()]);
+        \App\Modules\Accounting\Services\PartyAccounts::sync($company,$id);
         DB::table('accounting_company_parties')->insert(['company_id' => $company, 'counterparty_company_id' => $other, 'kind' => $kind, 'party_id' => $id]);
         Access::audit($r, $company, 'Intercompany contact created', $name, ['party_id' => $id, 'counterparty_company_id' => $other, 'kind' => $kind]);
 
@@ -105,7 +107,7 @@ class OrderController
 
     public function save(Request $r)
     {
-        $v = $r->validate(['seller_company_id' => 'required|integer|different:buyer_company_id', 'buyer_company_id' => 'required|integer', 'request_key' => 'required|uuid', 'order_date' => 'required|date_format:Y-m-d', 'due_date' => 'required|date_format:Y-m-d|after_or_equal:order_date', 'terms' => 'nullable|string|max:2000', 'lines' => 'required|array|min:1|max:100', 'lines.*.description' => 'required|string|max:250', 'lines.*.quantity' => 'required', 'lines.*.quoted_rate' => 'required', 'lines.*.rate' => 'required']);
+        $v = $r->validate(['seller_company_id' => 'required|integer|different:buyer_company_id', 'buyer_company_id' => 'required|integer', 'request_key' => 'required|uuid', 'order_date' => 'required|date_format:Y-m-d', 'due_date' => 'required|date_format:Y-m-d|after_or_equal:order_date', 'terms' => 'nullable|string|max:2000', 'lines' => 'required|array|min:1|max:100', 'lines.*.item_id'=>'nullable|integer','lines.*.description' => 'required|string|max:250', 'lines.*.quantity' => 'required', 'lines.*.quoted_rate' => 'required', 'lines.*.rate' => 'required']);
         $o = (object) ['seller_company_id' => (int) $v['seller_company_id'], 'buyer_company_id' => (int) $v['buyer_company_id']];
         $this->both($r, $o, 'create');
         $hash = hash('sha256', json_encode($v));
@@ -124,6 +126,7 @@ class OrderController
             $net = 0;
             $quote = 0;
             foreach ($v['lines'] as $l) {
+                $item=null;if(!empty($l['item_id'])){$item=DB::table('accounting_items')->where('company_id',$o->seller_company_id)->where('id',$l['item_id'])->where('active',true)->where('sellable',true)->first();abort_unless($item,422,'Select an active sales item in the seller company.');}
                 $qty = Ledger::minor($l['quantity']);
                 $rate = Ledger::minor($l['rate']);
                 $quoted = Ledger::minor($l['quoted_rate']);
@@ -134,6 +137,7 @@ class OrderController
                 $net += $total;
                 $quote += $qt;
                 $lines[] = ['description' => trim($l['description']), 'quantity' => Ledger::money($qty), 'rate' => Ledger::money($rate), 'quoted_rate' => Ledger::money($quoted), 'amount' => Ledger::money($total), 'amount_minor' => $total];
+                if($item)$lines[count($lines)-1]+=['item_id'=>$item->id,'item_code'=>$item->code,'item_name'=>$item->name,'unit'=>$item->unit];
             }
             abort_if($quote > Ledger::MAX_MINOR || $net > Ledger::MAX_MINOR, 422, 'Order total exceeds the supported limit.');
             $customer = $this->party($r, $o->seller_company_id, $o->buyer_company_id, 'customer');
@@ -187,10 +191,11 @@ return $id;
                 return;
             }abort_unless($o->status === 'confirmed' && $o->version === (int) $v['version'], 409, 'Confirm and reopen the latest order before creating invoices.');
             abort_unless(Ledger::book($o->seller_company_id)->currency === $o->currency && Ledger::book($o->buyer_company_id)->currency === $o->currency, 422, 'The company currencies changed.');
+            abort_unless(in_array((int) $v['cost_account_id'], \App\Modules\Accounting\Services\PurchaseOrderAccounts::ids($o->buyer_company_id), true), 422, 'Choose a ledger account under Cost of Sales for the purchase order.');
             $ids = [];
             foreach (['sale', 'purchase'] as $kind) {
                 $sale = $kind === 'sale';
-                $payload = ['company_id' => $sale ? $o->seller_company_id : $o->buyer_company_id, 'kind' => $kind, 'request_key' => (string) Str::uuid(), 'party_id' => $sale ? $o->customer_id : $o->supplier_id, 'posting_date' => $v['posting_date'], 'due_date' => $v['due_date'], 'control_account_id' => $sale ? $v['receivable_account_id'] : $v['payable_account_id'], 'tax_percent' => '0', 'reference' => 'IC-'.$o->id, 'notes' => 'Linked intercompany order. Pre-tax draft: review tax treatment before approval/posting.', 'lines' => array_map(fn ($l) => ['description' => $l['description'], 'quantity' => $l['quantity'], 'rate' => $l['rate'], 'account_id' => $sale ? $v['income_account_id'] : $v['cost_account_id']], json_decode($o->lines, true))];
+                $payload = ['company_id' => $sale ? $o->seller_company_id : $o->buyer_company_id, 'kind' => $kind, 'request_key' => (string) Str::uuid(), 'party_id' => $sale ? $o->customer_id : $o->supplier_id, 'posting_date' => $v['posting_date'], 'due_date' => $v['due_date'], 'control_account_id' => $sale ? $v['receivable_account_id'] : $v['payable_account_id'], 'tax_percent' => '0', 'reference' => 'IC-'.$o->id, 'notes' => 'Linked intercompany order. Pre-tax draft: review tax treatment before approval/posting.', 'lines' => array_map(fn ($l) => ['description' => $l['description'], 'quantity' => $l['quantity'], 'rate' => $l['rate'], 'account_id' => $sale ? $v['income_account_id'] : $v['cost_account_id']]+($sale&&!empty($l['item_id'])?['item_id'=>$l['item_id']]:[]), json_decode($o->lines, true))];
                 $child = Request::create('/accounting/api/invoices', 'POST', $payload);
                 $child->setUserResolver($r->getUserResolver());
                 $child->setLaravelSession($r->session());

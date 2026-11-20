@@ -39,7 +39,7 @@ async function refreshed(){if(journal.value)await view(journal.value.id);await l
 
 <template>
 <section class="imprest-workspace" :class="{'ac-document-open':!!journal}">
- <div class="ac-section-heading"><div><h2>Imprest / Petty Cash</h2><p class="muted">Officer funds, advance vouchers and expenses with a controlled spending balance.</p></div><button v-if="data?.can_manage" class="button primary" :disabled="!book||loading" @click="open('fund')">+ Assign officer fund</button></div>
+ <div class="ac-section-heading"><div><h2>Disbursement Voucher</h2><p class="muted">Officer funds, advance vouchers and expenses with a controlled spending balance.</p></div><button v-if="data?.can_manage" class="button primary" :disabled="!book||loading" @click="open('fund')">+ Assign officer fund</button></div>
  <p class="ac-help">Advance: Company Cash / Bank → Officer Cash. Expense: Officer Cash → Expense account. Only posted vouchers affect accounting reports; non-posted expenses reserve the officer's available funds.</p>
  <p v-if="data?.restricted" class="imprest-restriction">Your vouchers are limited to your assigned fund. The company's other cash and bank balances are unavailable for spending.</p>
  <p v-if="error" class="notice admin-error" role="alert">{{error}}</p>

@@ -23,7 +23,7 @@ class SignedCopyController
                     $id=Flow::submit($r,$company,'journal',(int)$v['document_id'],(int)$v['version'],'Prepared for CEO paper approval.');
                 }
                 $a=DB::table('accounting_approvals')->where('company_id',$company)->where('id',$id)->first();abort_unless($a,404);
-                abort_unless($a->workflow_mode==='paper'&&$a->document_type==='journal'&&$a->stage==='paper_ceo',409,'This voucher is not awaiting a CEO-signed copy.');
+                abort_unless($a->workflow_mode==='paper'&&$a->document_type==='journal'&&in_array($a->stage,['paper_ceo','manager_review'],true),409,'This voucher is not awaiting a CEO-signed copy.');
                 abort_unless($initial||$a->version===(int)$v['version'],409,'The approval changed. Refresh before uploading.');
                 $document=Flow::document($company,'journal',$a->document_id);$row=$document['row'];
                 abort_unless($row->status==='draft'&&$row->version===$a->document_version,409,'The voucher changed. Submit the latest saved version.');
@@ -33,7 +33,7 @@ class SignedCopyController
                 $name=mb_substr(str_replace(["\r","\n",'\\','/'],'_',basename($file->getClientOriginalName())),0,240);
                 $copy=DB::table('accounting_signed_copies')->insertGetId(['company_id'=>$company,'approval_id'=>$id,'submission_version'=>$a->submission_version,'document_version'=>$row->version,'path'=>$path,'original_name'=>$name,'mime'=>$mime,'size'=>$file->getSize(),'sha256'=>hash_file('sha256',$file->getRealPath()),'uploaded_by'=>$r->user()?->id,'uploaded_name'=>PlatformAccess::super($r)?'Super Admin':$r->user()->name,'created_at'=>now()]);
                 DB::table('accounting_approvals')->where('id',$id)->update(['stage'=>'manager_review','version'=>$a->version+1,'updated_at'=>now()]);
-                Flow::event($r,$id,'signed_copy_submitted','paper_ceo','manager_review',trim($v['note']));
+                Flow::event($r,$id,$a->stage==='manager_review'?'signed_copy_replaced':'signed_copy_submitted',$a->stage,'manager_review',trim($v['note']));
                 Access::audit($r,$company,'CEO-signed voucher copy attached',$document['detail']['number'],['copy_id'=>$copy,'document_version'=>$row->version,'submission_version'=>$a->submission_version]);
             });
         }catch(\Throwable $e){if($path)Storage::disk('local')->delete($path);throw $e;}

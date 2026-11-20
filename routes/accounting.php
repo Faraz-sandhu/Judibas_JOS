@@ -20,6 +20,12 @@ Route::get('/accounting/journals/{id}/print', [\App\Modules\Accounting\Http\Cont
 Route::get('/accounting/vouchers/{id}/print', [\App\Modules\Accounting\Http\Controllers\JournalController::class, 'printVoucher'])->whereNumber('id');
 Route::get('/accounting/invoices/{id}/print', [\App\Modules\Accounting\Http\Controllers\TradeController::class, 'printInvoice'])->whereNumber('id');
 Route::prefix('accounting/api')->middleware(\App\Modules\Accounting\Http\Middleware\RestrictImprestOfficer::class)->group(function () {
+    Route::get('journal-parties',[\App\Modules\Accounting\Http\Controllers\JournalController::class,'parties']);
+    Route::get('items',[\App\Modules\Accounting\Http\Controllers\ItemController::class,'index']);
+    Route::post('items',[\App\Modules\Accounting\Http\Controllers\ItemController::class,'save']);
+    Route::get('cheques', [\App\Modules\Accounting\Http\Controllers\ChequeController::class,'index']);
+    Route::post('cheques', [\App\Modules\Accounting\Http\Controllers\ChequeController::class,'save']);
+    Route::post('cheques/{id}/actions', [\App\Modules\Accounting\Http\Controllers\ChequeController::class,'action'])->whereNumber('id');
     Route::get('imprest', [\App\Modules\Accounting\Http\Controllers\ImprestController::class,'index']);
     Route::get('imprest/{id}', [\App\Modules\Accounting\Http\Controllers\ImprestController::class,'show'])->whereNumber('id');
     Route::post('imprest/funds', [\App\Modules\Accounting\Http\Controllers\ImprestController::class,'createFund']);

@@ -11,9 +11,16 @@ use Illuminate\Validation\Rule;
 
 class JournalController
 {
+    public function parties(Request $r)
+    {
+        $company=(int)$r->validate(['company_id'=>'required|integer'])['company_id'];
+        Access::company($r,$company,'journals.view');
+        return ['data'=>DB::table('accounting_parties')->where('company_id',$company)->where('active',true)->orderBy('name')->get(['id','name','kind','account_id'])];
+    }
+
     public function index(Request $r)
     {
-        $v = $r->validate(['company_id' => 'required|integer', 'id' => 'nullable|integer', 'page' => 'nullable|integer|min:1', 'status' => 'nullable|in:draft,posted,reversed', 'search' => 'nullable|string|max:150', 'vouchers'=>'sometimes|boolean', 'kind' => 'nullable|in:cash_receipt,cash_payment,bank_receipt,bank_payment,expense,income']);
+        $v = $r->validate(['company_id' => 'required|integer', 'id' => 'nullable|integer', 'page' => 'nullable|integer|min:1', 'status' => 'nullable|in:draft,posted,reversed', 'search' => 'nullable|string|max:150', 'vouchers'=>'sometimes|boolean', 'kind' => 'nullable|in:cash_receipt,cash_payment,bank_receipt,bank_payment,expense,income,contra']);
         $company = (int) $v['company_id'];
         Access::company($r, $company);
         $kind = ! empty($v['id']) ? DB::table('accounting_journals')->where('company_id', $company)->where('id', $v['id'])->value('kind') : ($v['kind'] ?? 'general');
@@ -36,7 +43,7 @@ class JournalController
 
     public function save(Request $r)
     {
-        $v = $r->validate(['company_id' => 'required|integer', 'id' => 'nullable|integer', 'version' => [Rule::requiredIf(fn () => $r->filled('id')), 'integer', 'min:1'], 'request_key' => 'required|uuid', 'posting_date' => 'required|date_format:Y-m-d', 'currency'=>'nullable|string|size:3','exchange_rate'=>'nullable','kind' => 'required|in:general,opening,cash_receipt,cash_payment,bank_receipt,bank_payment,expense,income', 'voucher_person' => 'nullable|string|max:150', 'reference' => 'nullable|string|max:150', 'remarks' => 'nullable|string|max:2000', 'lines' => 'required|array|min:2|max:100', 'lines.*.account_id' => 'required|integer', 'lines.*.debit' => 'required', 'lines.*.credit' => 'required', 'lines.*.description' => 'nullable|string|max:250']);
+        $v = $r->validate(['company_id' => 'required|integer', 'id' => 'nullable|integer', 'version' => [Rule::requiredIf(fn () => $r->filled('id')), 'integer', 'min:1'], 'request_key' => 'required|uuid', 'posting_date' => 'required|date_format:Y-m-d', 'currency'=>'nullable|string|size:3','exchange_rate'=>'nullable','kind' => 'required|in:general,opening,cash_receipt,cash_payment,bank_receipt,bank_payment,expense,income,contra', 'voucher_person' => 'nullable|string|max:150', 'reference' => 'nullable|string|max:150', 'remarks' => 'nullable|string|max:2000', 'lines' => 'required|array|min:2|max:100', 'lines.*.account_id' => 'required|integer', 'lines.*.party_id'=>'nullable|integer', 'lines.*.debit' => 'required', 'lines.*.credit' => 'required', 'lines.*.description' => 'nullable|string|max:250']);
         $company = (int) $v['company_id'];
         Access::company($r, $company, Permissions::journalGroup($v['kind']).($r->filled('id') ? '.update' : '.create'));
         $id = DB::transaction(function () use ($r, $v, $company) {
@@ -66,7 +73,7 @@ class JournalController
             } elseif ($existing = (clone $q)->where('request_key', $v['request_key'])->first()) {
                 $previous = Ledger::document($company, $existing->id);
                 $same = $existing->posting_date === $v['posting_date'] && $existing->kind === $v['kind'] && ($existing->voucher_person ?? '') === trim($v['voucher_person'] ?? '') && $existing->remarks === trim($v['remarks'] ?? '') && ($existing->reference ?? '') === ($v['reference'] ?? '');
-                $actual = collect($previous['lines'])->map(fn ($l) => collect($l)->only(array_merge(['company_id','account_id','position','debit_minor','credit_minor','description'],$foreign?['currency','exchange_rate','foreign_debit_minor','foreign_credit_minor']:[]))->all())->all();
+                $actual = collect($previous['lines'])->map(fn ($l) => collect($l)->only(array_merge(['company_id','account_id','position','debit_minor','credit_minor','description'],$foreign?['currency','exchange_rate','foreign_debit_minor','foreign_credit_minor']:[],['party_id']))->all())->all();
                 abort_unless($same && ($existing->currency??$book->currency)===$fx['currency'] && (float)$existing->exchange_rate===(float)$fx['exchange_rate'] && $actual == $lines, 409, 'This request key was already used for a different journal.');
 
                 return $existing->id;

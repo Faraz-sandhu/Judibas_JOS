@@ -19,7 +19,7 @@ class AccountingRealisticDemoTest extends TestCase
         $seeder->run();
         $company = DB::table('communication_companies')->where('name', 'Realistic COA automated test')->value('id');
         $accounts = DB::table('accounting_accounts')->where('company_id', $company);
-        $this->assertSame(43, (clone $accounts)->count());
+        $this->assertSame(51, (clone $accounts)->count());
         $this->assertSame('01-02-02', (clone $accounts)->where('name', 'Computers and Laptops')->value('code'));
         $journals = DB::table('accounting_journals')->where('company_id', $company)->count();
         $this->assertGreaterThan(12, $journals);

@@ -9,9 +9,18 @@ use App\Services\UserProductAccess;
 class AccountingOrdersTest extends TestCase {
  use DatabaseTransactions;
  private array $companies=[];
- protected function setUp():void{parent::setUp();$this->withoutVite();$this->withSession(['judibas_admin'=>true]);foreach(['Order Seller','Order Buyer']as$name){$id=DB::table('communication_companies')->insertGetId(['name'=>$name]);$this->companies[]=$id;$this->postJson('/accounting/api/initialize',['company_id'=>$id])->assertOk();$this->postJson('/accounting/api/books',['company_id'=>$id,'version'=>0,'currency'=>'PKR','approval_required'=>false,'start_date'=>now()->subYear()->toDateString()])->assertOk();}}
+ protected function setUp():void{parent::setUp();$this->withoutVite();$this->withSession(['judibas_admin'=>true]);foreach(['Order Seller','Order Buyer']as$name){$id=DB::table('communication_companies')->insertGetId(['name'=>$name]);$this->companies[]=$id;$this->postJson('/accounting/api/initialize',['company_id'=>$id])->assertOk();$this->postJson('/accounting/api/books',['company_id'=>$id,'version'=>0,'currency'=>'PKR','approval_required'=>false,'start_date'=>now()->subYear()->toDateString()])->assertOk();DB::table('accounting_accounts')->where('company_id',$id)->where('is_group',false)->where('root_type','Expense')->update(['account_type'=>'Cost of Sales']);}}
  private function payload():array{return ['seller_company_id'=>$this->companies[0],'buyer_company_id'=>$this->companies[1],'request_key'=>(string)Str::uuid(),'order_date'=>now()->toDateString(),'due_date'=>now()->addWeek()->toDateString(),'terms'=>'Service agreement','lines'=>[['description'=>'Website work','quantity'=>'1','quoted_rate'=>'200000','rate'=>'180000']]];}
- private function conversion():array{$a=DB::table('accounting_accounts')->where('company_id',$this->companies[0])->get();$b=DB::table('accounting_accounts')->where('company_id',$this->companies[1])->get();return ['company_id'=>$this->companies[1],'kind'=>'purchase','version'=>2,'posting_date'=>now()->toDateString(),'due_date'=>now()->addWeek()->toDateString(),'receivable_account_id'=>$a->firstWhere('account_type','Receivable')->id,'income_account_id'=>$a->first(fn($a)=>$a->root_type==='Income'&&!$a->is_group)->id,'payable_account_id'=>$b->firstWhere('account_type','Payable')->id,'cost_account_id'=>$b->first(fn($a)=>$a->root_type==='Expense'&&!$a->is_group)->id];}
+ private function conversion():array{$a=DB::table('accounting_accounts')->where('company_id',$this->companies[0])->get();$b=DB::table('accounting_accounts')->where('company_id',$this->companies[1])->get();return ['company_id'=>$this->companies[1],'kind'=>'purchase','version'=>2,'posting_date'=>now()->toDateString(),'due_date'=>now()->addWeek()->toDateString(),'receivable_account_id'=>$a->firstWhere('account_type','Receivable')->id,'income_account_id'=>$a->first(fn($a)=>$a->root_type==='Income'&&!$a->is_group)->id,'payable_account_id'=>$b->firstWhere('account_type','Payable')->id,'cost_account_id'=>$b->firstWhere('account_type','Cost of Sales')->id];}
+ public function test_purchase_order_rejects_operating_expense_account():void{
+  $id=$this->postJson('/accounting/api/orders',$this->payload())->assertOk()->json('id');
+  $this->postJson("/accounting/api/orders/$id/actions",['company_id'=>$this->companies[1],'kind'=>'purchase','version'=>1,'action'=>'confirm'])->assertOk();
+  $body=$this->conversion();
+  DB::table('accounting_accounts')->where('id',$body['cost_account_id'])->update(['account_type'=>'Operating Expense']);
+  $before=DB::table('accounting_invoices')->count();
+  $this->postJson("/accounting/api/orders/$id/invoices",$body)->assertUnprocessable();
+  $this->assertSame($before,DB::table('accounting_invoices')->count());
+ }
  public function test_pair_contacts_idempotency_conversion_and_existing_posting():void{
   $v=$this->payload();$id=$this->postJson('/accounting/api/orders',$v)->assertOk()->json('id');$this->postJson('/accounting/api/orders',$v)->assertOk()->assertJsonPath('id',$id);$this->assertSame(1,DB::table('accounting_intercompany_orders')->where('request_key',$v['request_key'])->count());
   $this->assertDatabaseHas('accounting_parties',['company_id'=>$this->companies[0],'kind'=>'customer','name'=>'Order Buyer']);$this->assertDatabaseHas('accounting_parties',['company_id'=>$this->companies[1],'kind'=>'supplier','name'=>'Order Seller']);
@@ -31,4 +40,16 @@ class AccountingOrdersTest extends TestCase {
   $v=$this->payload();$id=$this->postJson('/accounting/api/orders',$v)->assertOk()->json('id');$v['lines'][0]['rate']='170000';$this->postJson('/accounting/api/orders',$v)->assertStatus(409);$v['request_key']=(string)Str::uuid();$v['buyer_company_id']=$v['seller_company_id'];$this->postJson('/accounting/api/orders',$v)->assertUnprocessable();
   $this->postJson("/accounting/api/orders/$id/actions",['company_id'=>$this->companies[1],'kind'=>'purchase','version'=>9,'action'=>'confirm'])->assertStatus(409);
  }
+ public function test_seller_catalogue_item_is_preserved_only_on_seller_invoice():void {
+  $item=DB::table('accounting_items')->insertGetId(['company_id'=>$this->companies[0],'code'=>'DEV-ORDER','name'=>'Development service','kind'=>'service']);
+  $v=$this->payload();$v['lines'][0]['item_id']=$item;
+  $id=$this->postJson('/accounting/api/orders',$v)->assertOk()->json('id');
+  $this->postJson('/accounting/api/orders/'.$id.'/actions',['company_id'=>$this->companies[1],'kind'=>'purchase','version'=>1,'action'=>'confirm'])->assertOk();
+  $this->postJson('/accounting/api/orders/'.$id.'/invoices',$this->conversion())->assertOk();
+  $sale=DB::table('accounting_invoices')->where('company_id',$this->companies[0])->first();$purchase=DB::table('accounting_invoices')->where('company_id',$this->companies[1])->first();
+  $this->assertSame($item,json_decode($sale->lines,true)[0]['item_id']);$this->assertArrayNotHasKey('item_id',json_decode($purchase->lines,true)[0]);
+  $wrong=$this->payload();$wrong['lines'][0]['item_id']=$item;[$wrong['seller_company_id'],$wrong['buyer_company_id']]=[$wrong['buyer_company_id'],$wrong['seller_company_id']];
+  $this->postJson('/accounting/api/orders',$wrong)->assertUnprocessable();
+ }
+
 }

@@ -59,6 +59,7 @@ class ChartOfAccountsController
                 }
             }
             \App\Modules\Accounting\Services\DefaultAssetGroups::ensureNonCurrentAssets($company);
+            \App\Modules\Accounting\Services\PartyAccounts::backfill($company);
             Access::audit($r, $company, 'Chart initialized', 'Starter chart of accounts');
         });
 
@@ -85,6 +86,7 @@ class ChartOfAccountsController
             abort_if(isset($v['id']) && ! $old, 404);
             abort_if($old && $old->version !== (int) ($v['version'] ?? 0), 409, 'This account was changed by another person. Close this form and reopen the account before saving.');
             abort_if($old && \App\Modules\Accounting\Services\ImprestFunds::protectedAccount($old->id),422,'Officer fund ledger accounts are managed through Imprest / Petty Cash.');
+            abort_if($old && \App\Modules\Accounting\Services\PartyAccounts::protected($old->id),422,'Manage this account through its customer or supplier.');
             abort_if($old?->is_system, 422, 'Root groups are protected. Add or edit accounts beneath them.');
             $parent = (clone $q)->where('id', $v['parent_id'])->first();
             abort_unless($parent && $parent->is_group, 422, 'Choose a group in this company as the parent.');

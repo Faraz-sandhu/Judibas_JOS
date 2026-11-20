@@ -342,6 +342,57 @@ class AccountingLedgerTest extends TestCase
         $this->get('/accounting/journals/'.$journal['id'].'/print?company_id='.$other)->assertNotFound();
     }
 
+    public function test_contra_moves_cash_to_bank_without_income_and_rejects_invalid_accounts(): void
+    {
+        $this->create($this->body('50000.00'));
+        $body=$this->body('20000.00',['kind'=>'contra','voucher_person'=>'Daily surplus return','lines'=>[
+            ['account_id'=>$this->accounts['1110'],'debit'=>'0.00','credit'=>'20000.00'],
+            ['account_id'=>$this->accounts['1120'],'debit'=>'20000.00','credit'=>'0.00'],
+        ]]);
+        $draft=$this->create($body,false);
+        $this->assertStringStartsWith('CV-',$draft['number']);
+        $this->create($body);
+        $rows=collect($this->getJson('/accounting/api/data?company_id='.$this->company)->assertOk()->json('accounts'))->keyBy('id');
+        $this->assertSame('30000.00',$rows[$this->accounts['1110']]['balance']);
+        $this->assertSame('20000.00',$rows[$this->accounts['1120']]['balance']);
+        $this->assertSame('50000.00',$rows[$this->accounts['4100']]['credit']);
+        $body['request_key']=(string)Str::uuid();$body['lines'][1]['account_id']=$this->accounts['5110'];
+        $this->postJson('/accounting/api/journals',$body)->assertUnprocessable();
+        $body['request_key']=(string)Str::uuid();$body['lines'][1]['account_id']=$this->accounts['1120'];$body['lines'][0]['credit']='40000.00';$body['lines'][1]['debit']='40000.00';
+        $this->postJson('/accounting/api/journals',$body)->assertUnprocessable();
+    }
+
+    public function test_cash_flow_reconciles_posted_cash_and_excludes_internal_transfers_and_drafts():void
+    {
+        $date=now()->toDateString();
+        $this->create($this->body('1000.00',['posting_date'=>now()->subDay()->toDateString(),'lines'=>[['account_id'=>$this->accounts['1110'],'debit'=>'1000.00','credit'=>'0.00'],['account_id'=>$this->accounts['3100'],'debit'=>'0.00','credit'=>'1000.00']]]));
+        $this->create($this->body('100.00'));
+        $this->create($this->body('500.00'),false);
+        $this->create($this->body('30.00',['lines'=>[['account_id'=>$this->accounts['5110'],'debit'=>'30.00','credit'=>'0.00'],['account_id'=>$this->accounts['1110'],'debit'=>'0.00','credit'=>'30.00']]]));
+        $this->create($this->body('50.00',['kind'=>'contra','voucher_person'=>'Internal transfer','lines'=>[['account_id'=>$this->accounts['1120'],'debit'=>'50.00','credit'=>'0.00'],['account_id'=>$this->accounts['1110'],'debit'=>'0.00','credit'=>'50.00']]]));
+        $report=$this->getJson('/accounting/api/reports?'.http_build_query(['company_id'=>$this->company,'report'=>'cashflow','from'=>$date,'to'=>$date]))->assertOk();
+        $report->assertJsonPath('summary.opening','1000.00')->assertJsonPath('summary.inflow','100.00')->assertJsonPath('summary.outflow','30.00')->assertJsonPath('summary.net','70.00')->assertJsonPath('summary.closing','1070.00')->assertJsonPath('activities.operating','70.00')->assertJsonPath('internal_transfers_excluded',1)->assertJsonPath('review_count',0);
+        $balances=collect($report->json('accounts'))->sum(fn($a)=>(float)$a['balance']);$this->assertSame(1070.0,$balances);
+    }
+
+    public function test_cash_flow_separates_opening_entries_from_trading_cash_flow():void
+    {
+        $start=DB::table('accounting_books')->where('company_id',$this->company)->value('start_date');
+        $this->create($this->body('1000.00',['kind'=>'opening','posting_date'=>$start,'lines'=>[['account_id'=>$this->accounts['1110'],'debit'=>'1000.00','credit'=>'0.00'],['account_id'=>$this->accounts['3100'],'debit'=>'0.00','credit'=>'1000.00']]]));
+        $this->getJson('/accounting/api/reports?'.http_build_query(['company_id'=>$this->company,'report'=>'cashflow','from'=>$start,'to'=>now()->toDateString()]))->assertOk()->assertJsonPath('summary.inflow','0.00')->assertJsonPath('summary.opening_adjustments','1000.00')->assertJsonPath('summary.closing','1000.00');
+    }
+
+    public function test_cash_flow_classifies_capital_fixed_assets_and_marks_ambiguous_cash_for_review():void
+    {
+        $this->create($this->body('200.00',['lines'=>[['account_id'=>$this->accounts['1110'],'debit'=>'200.00','credit'=>'0.00'],['account_id'=>$this->accounts['3100'],'debit'=>'0.00','credit'=>'200.00']]]));
+        foreach(['Fixed Asset'=>'50.00','General'=>'10.00'] as $type=>$amount){
+            $parent=DB::table('accounting_accounts')->find($this->accounts['1100']);
+            $id=DB::table('accounting_accounts')->insertGetId(['company_id'=>$this->company,'parent_id'=>$parent->id,'code'=>\App\Modules\Accounting\Services\ChartSummary::nextCode($this->company,$parent),'name'=>'Cashflow '.$type,'root_type'=>'Asset','account_type'=>$type,'active'=>true,'is_group'=>false]);
+            $this->create($this->body($amount,['lines'=>[['account_id'=>$id,'debit'=>$amount,'credit'=>'0.00'],['account_id'=>$this->accounts['1110'],'debit'=>'0.00','credit'=>$amount]]]));
+        }
+        $this->getJson('/accounting/api/reports?'.http_build_query(['company_id'=>$this->company,'report'=>'cashflow','from'=>now()->toDateString(),'to'=>now()->toDateString()]))->assertOk()->assertJsonPath('activities.financing','200.00')->assertJsonPath('activities.investing','-50.00')->assertJsonPath('activities.review','-10.00')->assertJsonPath('review_count',1)->assertJsonPath('summary.closing','140.00');
+    }
+
     private function body(string $amount = '100.00', array $replace = []): array
     {
         return array_replace(['company_id' => $this->company, 'request_key' => (string) Str::uuid(), 'posting_date' => now()->toDateString(), 'kind' => 'general', 'remarks' => 'Cash revenue', 'reference' => 'Test reference', 'lines' => [['account_id' => $this->accounts['1110'], 'debit' => $amount, 'credit' => '0.00'], ['account_id' => $this->accounts['4100'], 'debit' => '0.00', 'credit' => $amount]]], $replace);
@@ -444,13 +495,27 @@ class AccountingLedgerTest extends TestCase
         $this->postJson('/accounting/api/journals', $b)->assertUnprocessable();
         $b = $this->body();$b['lines'][0]['credit'] = '1.00';
         $this->postJson('/accounting/api/journals', $b)->assertUnprocessable();
-        foreach (['1000', '1130', '2110'] as $code) {
+        foreach (['1000'] as $code) {
             $b = $this->body();$b['lines'][0]['account_id'] = $this->accounts[$code];
             $this->postJson('/accounting/api/journals', $b)->assertUnprocessable();
         }
         $this->assertSame(0, DB::table('accounting_journals')->where('company_id', $this->company)->count());
         $b = $this->body();$b['lines'][0]['debit'] = ['invalid' => 100];
         $this->postJson('/accounting/api/journals', $b)->assertUnprocessable();
+    }
+
+    public function test_general_journals_allow_receivable_and_payable_ledger_accounts(): void
+    {
+        foreach (['1130','2110'] as $code) {
+            $body=$this->body('75.00');
+            $body['lines'][0]['account_id']=$this->accounts[$code];
+            $party=$this->postJson('/accounting/api/parties',['company_id'=>$this->company,'kind'=>$code==='1130'?'customer':'supplier','name'=>'JV party '.$code,'active'=>true])->assertOk()->json();
+            $body['lines'][0]['party_id']=DB::table('accounting_parties')->where('company_id',$this->company)->where('name','JV party '.$code)->value('id');
+            $journal=$this->create($body);
+            $this->postJson('/accounting/api/journals',$body)->assertOk()->assertJsonPath('journal.id',$journal['id']);
+            $this->assertSame('posted',$journal['status']);
+            $this->assertDatabaseHas('accounting_journal_lines',['journal_id'=>$journal['id'],'account_id'=>$this->accounts[$code],'debit_minor'=>7500]);
+        }
     }
 
     public function test_draft_versions_prevent_stale_updates_and_posting(): void

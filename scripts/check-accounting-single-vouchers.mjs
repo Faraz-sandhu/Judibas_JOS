@@ -19,7 +19,7 @@ try {
   await route.fulfill({contentType:'application/json',body:JSON.stringify(data)});
  });
  await page.route(/\/accounting(?:\?.*)?$/,async route=>{const response=await page.request.get(origin+'/products/accounts');await route.fulfill({contentType:'text/html',body:await response.text()});});
- async function choose(label,text){await page.getByRole('combobox',{name:label,exact:true}).click();await page.getByRole('searchbox',{name:'Search '+label,exact:true}).fill(text);await page.getByRole('option').first().click();}
+ async function choose(label,text){await page.getByRole('combobox',{name:label,exact:true}).click();await page.getByRole('searchbox',{name:'Search '+label,exact:true}).fill(text);const trigger=page.getByRole('combobox',{name:label,exact:true});const dropdown=page.locator('.ac-select-panel');await expect.poll(async()=>{const t=await trigger.boundingBox(),d=await dropdown.boundingBox();return Math.min(Math.abs(d.y+d.height-t.y),Math.abs(d.y-t.y-t.height));}).toBeLessThanOrEqual(8);await page.getByRole('option').first().click();}
  await page.goto(origin+'/accounting?company_id=51#single-vouchers',{waitUntil:'networkidle'});await page.getByRole('button',{name:'+ Create voucher',exact:true}).click();
  await expect(page.locator('.ac-filters')).toBeHidden();
  await expect(page.locator('.ac-section-heading')).toBeHidden();

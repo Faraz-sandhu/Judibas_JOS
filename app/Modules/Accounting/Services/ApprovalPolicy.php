@@ -6,7 +6,7 @@ use Illuminate\Support\Facades\DB;
 class ApprovalPolicy
 {
     public const TYPES = [
-        'general'=>'Journal entries', 'opening'=>'Opening entries',
+        'contra'=>'CV - Contra vouchers', 'general'=>'Journal entries', 'opening'=>'Opening entries',
         'cash_payment'=>'CPV - Cash payment vouchers', 'cash_receipt'=>'CRV - Cash receipt vouchers',
         'bank_payment'=>'BPV - Bank payment vouchers', 'bank_receipt'=>'BRV - Bank receipt vouchers',
         'expense'=>'EV - Expense vouchers', 'income'=>'IV - Income vouchers',

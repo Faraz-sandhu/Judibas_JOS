@@ -1,0 +1,31 @@
+﻿import {chromium,expect} from '@playwright/test';import {readFile} from 'node:fs/promises';import path from 'node:path';
+const manifest=JSON.parse(await readFile('public/build/manifest.json','utf8')),entry=manifest['resources/js/app.ts'];const browser=await chromium.launch({channel:'msedge',headless:true});
+try{
+ const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(e.message));let item=null;
+ const groups=['items','sales','purchases','journals','cash_payments','cash_receipts','bank_payments','bank_receipts','expense_vouchers','income_vouchers'];const permissions=groups.flatMap(g=>[g+'.view',g+'.create',g+'.update']);
+ const accounts=[{id:11,code:'04-01',name:'Service Revenue',root_type:'Income',account_type:'Sales'},{id:12,code:'05-01',name:'Outsourcing',root_type:'Expense',account_type:'General'},{id:13,code:'01-01',name:'Cash',root_type:'Asset',account_type:'Cash'},{id:14,code:'01-02',name:'Bank',root_type:'Asset',account_type:'Bank'},{id:15,code:'01-03',name:'Client A',root_type:'Asset',account_type:'Receivable'}].map(a=>({...a,active:true,is_group:false}));
+ await page.route('**/*',async route=>{const u=new URL(route.request().url()),p=u.pathname,body=route.request().method()==='POST'?route.request().postDataJSON():null;
+ if(p.startsWith('/build/'))return route.fulfill({body:await readFile(path.resolve('public',p.slice(1))),contentType:p.endsWith('.css')?'text/css':'text/javascript'});
+ if(p.startsWith('/accounting/api/')){let d={};if(p.endsWith('/data'))d={company_id:51,companies:[{id:51,name:'Skyinfinit'}],permissions,accounts,book:{currency:'PKR',start_date:'2026-01-01',approval_required:false},can_manage:true,can_delete:true};
+ else if(p.endsWith('/items')&&body){expect(body.code).toBe('DEV-TEST');item={...body,id:1,version:1,sale_rate:'1500.00',purchase_rate:'900.00'};d={message:'Item saved.'};}
+ else if(p.endsWith('/items'))d={data:item?[item]:[],current_page:1,last_page:1,total:item?1:0};
+ else if(p.endsWith('/parties'))d={data:[{id:1,name:'Client A',active:true,account_id:15}]};
+ else if(p.endsWith('/invoices')||p.endsWith('/journals'))d={data:[],last_page:1,total:0};
+ return route.fulfill({json:d});}
+ const portal={name:'Judibas',products:[],workspacePath:'/accounting',companyWorkspace:{product:'accounting',id:51,slug:'skyinfinit'},workspaceCompanies:[{id:51,name:'Skyinfinit',slug:'skyinfinit'}],admin:true,administrator:true,validationErrors:[],announcement:{}};
+ return route.fulfill({contentType:'text/html',body:`<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${entry.css.map(c=>`<link rel="stylesheet" href="/build/${c}">`).join('')}</head><body><script>window.portal=${JSON.stringify(portal)}</script><div id="app"></div><script type="module" src="/build/${entry.file}"></script></body></html>`});});
+ await page.goto('http://items-preview.test/accounting/skyinfinit#items');
+ await expect(page.getByRole('heading',{name:'Items & Services',exact:true})).toBeVisible();
+ for(const toggle of await page.locator('.ac-nav-disclosure').all())await expect(toggle).toHaveAttribute('aria-expanded',(await toggle.innerText()).trim()==='Workspace'?'true':'false');
+ await expect(page.locator('.ac-nav-children button').filter({hasText:/^Single vouchers$/})).toHaveCount(1);
+ await page.getByRole('button',{name:'+ Create item / service',exact:true}).click();await page.getByLabel('Item code',{exact:true}).fill('DEV-TEST');await page.getByLabel('Name',{exact:true}).fill('Website development');await page.getByLabel('Default sales rate',{exact:true}).fill('1500');await page.getByLabel('Default purchase rate',{exact:true}).fill('900');await page.getByLabel('Description',{exact:true}).fill('Website development package');
+ async function choose(label,option){await page.getByRole('combobox',{name:label,exact:true}).click();await page.getByRole('option',{name:option}).click();}
+ await choose('Default income account',/Service Revenue/);await choose('Default expense / asset account',/Outsourcing/);await page.getByRole('button',{name:'Save item / service',exact:true}).click();await expect(page.getByText('Website development',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Sales',exact:true}).click();await page.getByRole('button',{name:'Sales invoices',exact:true}).click();await page.getByRole('button',{name:'+ Create invoice',exact:true}).click();await choose('Item line 1',/DEV-TEST/);await expect(page.getByLabel('Description line 1',{exact:true})).toHaveValue('Website development package');await expect(page.getByLabel('Rate line 1',{exact:true})).toHaveValue('1500.00');await expect(page.getByRole('combobox',{name:'Account line 1',exact:true})).toContainText('Service Revenue');
+ await page.getByRole('button',{name:'Vouchers',exact:true}).click();await expect(page.getByRole('button',{name:'Single vouchers',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Sales',exact:true})).toHaveAttribute('aria-expanded','false');
+ for(const [label,kind] of [['Cash Payment (CPV)','cash_payment'],['Cash Receipt (CRV)','cash_receipt'],['Bank Payment (BPV)','bank_payment'],['Bank Receipt (BRV)','bank_receipt'],['Expense Voucher (EV)','expense'],['Income Voucher (IV)','income'],['Contra Voucher (CV)','contra']]){
+ await page.getByRole('button',{name:label,exact:true}).click();await expect(page.locator('.ac-document select').filter({has:page.locator('option[value=contra]')})).toHaveValue(kind);
+ }
+ await page.reload();await expect(page.getByRole('button',{name:'Vouchers',exact:true})).toHaveAttribute('aria-expanded','true');await expect(page.locator('.ac-document select').filter({has:page.locator('option[value=contra]')})).toHaveValue('contra');
+ await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);expect(errors).toEqual([]);console.log('PASS: Workspace default open, active group retained after reload, one-open accordion, item creation, invoice item autofill, seven preset voucher forms, separate Single vouchers link and mobile runtime checks. APIs mocked.');
+}finally{await browser.close();}

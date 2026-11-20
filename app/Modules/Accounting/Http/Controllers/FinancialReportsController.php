@@ -23,11 +23,16 @@ class FinancialReportsController
 
     private function buildReport(Request $r)
     {
-        $v = $r->validate(['company_id' => 'required|integer', 'report' => 'required|in:trial,ledger,profit,balance,receivables,payables', 'from' => 'required|date_format:Y-m-d', 'to' => 'required|date_format:Y-m-d|after_or_equal:from', 'account_id' => 'nullable|integer', 'party_id' => 'nullable|integer', 'page' => 'nullable|integer|min:1', 'export' => 'nullable|in:csv', 'trial_columns' => 'nullable|in:2,6', 'basis' => 'nullable|in:accrual,cash']);
+        $v = $r->validate(['company_id' => 'required|integer', 'report' => 'required|in:trial,ledger,profit,balance,receivables,payables,cashflow', 'from' => 'required|date_format:Y-m-d', 'to' => 'required|date_format:Y-m-d|after_or_equal:from', 'account_id' => 'nullable|integer', 'party_id' => 'nullable|integer', 'page' => 'nullable|integer|min:1', 'export' => 'nullable|in:csv', 'trial_columns' => 'nullable|in:2,6', 'basis' => 'nullable|in:accrual,cash']);
         $company = (int) $v['company_id'];
         Access::company($r, $company, 'reports.'.$v['report']);
         if ($r->input('export') === 'csv') \App\Modules\Accounting\Services\Permissions::require($r, 'reports.export');
         $book = Ledger::book($company);
+        if($v['report']==='cashflow'){
+            $result=\App\Modules\Accounting\Services\CashFlow::report($company,$v['from'],$v['to'],$book->currency);
+            if($r->input('export')==='csv')return $this->csv($r,$company,'cashflow',['Date','Journal','Description','Activity','Cash in','Cash out','Net'],collect($result['rows'])->map(fn($row)=>[$row['date'],$row['number'],$row['description'],$row['category'],$row['inflow'],$row['outflow'],$row['net']]));
+            return $result;
+        }
         if (in_array($v['report'], ['receivables', 'payables'])) {
             return $this->aging($r, $company, $v, $book->currency);
         }

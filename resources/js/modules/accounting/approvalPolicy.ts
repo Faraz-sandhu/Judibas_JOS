@@ -1,4 +1,5 @@
 export const approvalTypes=[
+ {key:'contra',name:'CV - Contra vouchers',paper:true},
  {key:'general',name:'Journal entries',paper:true},{key:'opening',name:'Opening entries',paper:true},
  {key:'cash_payment',name:'CPV - Cash payment vouchers',paper:true},{key:'cash_receipt',name:'CRV - Cash receipt vouchers',paper:true},
  {key:'bank_payment',name:'BPV - Bank payment vouchers',paper:true},{key:'bank_receipt',name:'BRV - Bank receipt vouchers',paper:true},

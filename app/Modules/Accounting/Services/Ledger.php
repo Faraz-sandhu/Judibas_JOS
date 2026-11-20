@@ -53,14 +53,21 @@ class Ledger
         foreach ($input as $index => $line) {
             $account = DB::table('accounting_accounts')->where('company_id', $company)->where('id', $line['account_id'])->first();
             abort_unless($account && $account->active && ! $account->is_group, 422, 'Choose an active ledger account in this company for every line.');
-            // Party ledgers require invoice/payment allocation, which general journals must not bypass.
-            abort_if(in_array($account->account_type, ['Receivable', 'Payable']), 422, 'Customer and supplier control accounts require a party transaction. Use a general ledger account for this journal.');
+            $partyId = null;
+            if (in_array($account->account_type, ['Receivable','Payable'], true)) {
+                $kind = $account->account_type === 'Receivable' ? 'customer' : 'supplier';
+                $mapped = DB::table('accounting_parties')->where('company_id',$company)->where('account_id',$account->id)->first();
+                $partyId = $mapped?->id ?? ($line['party_id'] ?? null);
+                $party = DB::table('accounting_parties')->where('company_id',$company)->where('id',$partyId)->where('kind',$kind)->where('active',true)->first();
+                abort_unless($party,422,'Select the matching active customer or supplier for the control account.');
+                abort_if($mapped && !empty($line['party_id']) && (int)$line['party_id'] !== $mapped->id,422,'This account belongs to a different customer or supplier.');
+            }
             $d = self::minor($line['debit']);
             $c = self::minor($line['credit']);
             abort_unless(($d > 0 && $c === 0) || ($c > 0 && $d === 0), 422, 'Each line must contain either a debit or a credit, never both.');
             $debit += $d;
             $credit += $c;
-            $lines[] = ['company_id' => $company, 'account_id' => $account->id, 'position' => $index + 1, 'debit_minor' => $d, 'credit_minor' => $c, 'description' => $line['description'] ?? null];
+            $lines[] = ['company_id' => $company, 'account_id' => $account->id, 'position' => $index + 1, 'debit_minor' => $d, 'credit_minor' => $c, 'description' => $line['description'] ?? null]+['party_id'=>$partyId?(int)$partyId:null];
         }
         abort_unless(count($lines) >= 2 && $debit === $credit && $debit > 0, 422, 'Total debits must equal total credits and be greater than zero.');
 
@@ -74,6 +81,12 @@ class Ledger
         abort_unless(count($lines)>=2,422,'Add a settlement account and at least one detail line.');
         abort_if(trim($person ?? '')==='',422,'Enter the person, organisation or payment purpose.');
         $accounts=DB::table('accounting_accounts')->where('company_id',$company)->whereIn('id',array_column($lines,'account_id'))->get()->keyBy('id');
+        if($kind==='contra'){
+            abort_unless(count($lines)===2,422,'A contra voucher needs one source and one destination account.');
+            foreach($lines as $line){$account=$accounts[$line['account_id']];abort_unless($account->root_type==='Asset'&&in_array($account->account_type,['Cash','Bank']),422,'Contra transfers require Cash or Bank accounts in this company.');}
+            abort_unless(count(array_unique(array_column($lines,'account_id')))===2,422,'Source and destination accounts must be different.');
+            return;
+        }
         $settlements=0;
         foreach($lines as $line){
             $account=$accounts[$line['account_id']];
@@ -96,7 +109,7 @@ class Ledger
     // Call inside the company-locked transaction so concurrent postings cannot overspend.
     public static function requireCashFunds(int $company, string $kind, string $date, array $lines): void
     {
-        if (!in_array($kind,['cash_payment','bank_payment','expense'])) return;
+        if (!in_array($kind,['cash_payment','bank_payment','expense','contra'])) return;
         $cashIds = DB::table('accounting_accounts')->where('company_id', $company)
             ->where('root_type', 'Asset')->whereIn('account_type', ['Cash','Bank'])->pluck('id')->all();
         foreach ($lines as $line) {
@@ -139,7 +152,7 @@ class Ledger
         abort_unless($journal->status === 'draft', 409, 'Only a draft can be posted.');
         ImprestFunds::guardPost($company, $journal);
         self::checkDate(self::book($company), $journal->posting_date);
-        $lines = DB::table('accounting_journal_lines')->where('journal_id', $journal->id)->get()->map(fn ($l) => ['account_id' => $l->account_id, 'debit' => self::money($l->debit_minor), 'credit' => self::money($l->credit_minor), 'description' => $l->description])->all();
+        $lines = DB::table('accounting_journal_lines')->where('journal_id', $journal->id)->get()->map(fn ($l) => ['account_id' => $l->account_id, 'debit' => self::money($l->debit_minor), 'credit' => self::money($l->credit_minor), 'description' => $l->description, 'party_id'=>$l->party_id])->all();
         $validated = self::lines($company, $lines);
         $originalLines=DB::table('accounting_journal_lines')->where('journal_id',$journal->id)->get();
         foreach($originalLines as $line){$a=DB::table('accounting_accounts')->find($line->account_id);Currency::account($a,$line->currency??self::book($company)->currency,$company);}
