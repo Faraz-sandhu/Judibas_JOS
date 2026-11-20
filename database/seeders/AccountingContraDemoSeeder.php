@@ -45,4 +45,3 @@ class AccountingContraDemoSeeder extends Seeder
         } finally { app()->instance('request',$original); }
     }
 }
-
