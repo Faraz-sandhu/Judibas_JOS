@@ -29,6 +29,21 @@ class AccountingLedgerTest extends TestCase
         $this->postJson('/accounting/api/books', ['company_id' => $this->company, 'version' => 0, 'currency' => 'PKR', 'approval_required' => false, 'start_date' => now()->subYear()->toDateString()])->assertOk();
     }
 
+    public function test_specialized_reports_filter_posted_accounts_and_preserve_existing_reports(): void
+    {
+        $this->create($this->body('75.00'));
+        $this->create($this->body('25.00'),false);
+        foreach (['cash-book'=>'75.00','income-report'=>'75.00','expense-report'=>'0.00','bank-book'=>'0.00','customer-ledger'=>'0.00','supplier-ledger'=>'0.00'] as $report=>$expected) {
+            $url='/accounting/api/reports?'.http_build_query(['company_id'=>$this->company,'report'=>$report,'from'=>now()->startOfMonth()->toDateString(),'to'=>now()->toDateString()]);
+            $response=$this->getJson($url)->assertOk();
+            $this->assertSame($expected,$response->json($report==='income-report'?'credit':'debit'));
+            $this->get($url.'&export=csv')->assertOk();
+        }
+        foreach(['aged-receivables','aged-payables','sales-report'] as $report) {
+            $this->getJson('/accounting/api/reports?'.http_build_query(['company_id'=>$this->company,'report'=>$report,'from'=>now()->startOfMonth()->toDateString(),'to'=>now()->toDateString()]))->assertOk();
+        }
+    }
+
     public function test_chart_rolls_up_posted_amounts_and_excludes_drafts(): void
     {
         $this->create($this->body('900.00'), false);

@@ -8,6 +8,13 @@ use Illuminate\Support\Facades\DB;
 
 class FinancialReportsController
 {
+    public function parties(Request $r)
+    {
+        $v=$r->validate(['company_id'=>'required|integer','report'=>'required|in:customer-ledger,supplier-ledger']);
+        Access::company($r,(int)$v['company_id'],'reports.ledger');
+        return ['data'=>DB::table('accounting_parties')->where('company_id',$v['company_id'])->where('kind',$v['report']==='customer-ledger'?'customer':'supplier')->orderBy('name')->get(['id','name'])];
+    }
+
     public function report(Request $r)
     {
         $outer = DB::transactionLevel() === 0;
@@ -23,11 +30,23 @@ class FinancialReportsController
 
     private function buildReport(Request $r)
     {
-        $v = $r->validate(['company_id' => 'required|integer', 'report' => 'required|in:trial,ledger,profit,balance,receivables,payables,cashflow', 'from' => 'required|date_format:Y-m-d', 'to' => 'required|date_format:Y-m-d|after_or_equal:from', 'account_id' => 'nullable|integer', 'party_id' => 'nullable|integer', 'page' => 'nullable|integer|min:1', 'export' => 'nullable|in:csv', 'trial_columns' => 'nullable|in:2,6', 'basis' => 'nullable|in:accrual,cash']);
+        $v = $r->validate(['company_id' => 'required|integer', 'report' => 'required|in:trial,ledger,profit,balance,receivables,payables,cashflow,customer-ledger,supplier-ledger,expense-report,income-report,sales-report,cash-book,bank-book,aged-receivables,aged-payables', 'from' => 'required|date_format:Y-m-d', 'to' => 'required|date_format:Y-m-d|after_or_equal:from', 'account_id' => 'nullable|integer', 'party_id' => 'nullable|integer', 'page' => 'nullable|integer|min:1', 'export' => 'nullable|in:csv', 'trial_columns' => 'nullable|in:2,6', 'basis' => 'nullable|in:accrual,cash']);
         $company = (int) $v['company_id'];
-        Access::company($r, $company, 'reports.'.$v['report']);
+        $requested=$v['report'];
+        $aliases=['customer-ledger'=>'ledger','supplier-ledger'=>'ledger','expense-report'=>'ledger','income-report'=>'ledger','cash-book'=>'ledger','bank-book'=>'ledger','aged-receivables'=>'receivables','aged-payables'=>'payables'];
+        $v['report']=$aliases[$requested]??$requested;
+        Access::company($r, $company, $requested==='sales-report'?'sales.view':'reports.'.$v['report']);
         if ($r->input('export') === 'csv') \App\Modules\Accounting\Services\Permissions::require($r, 'reports.export');
         $book = Ledger::book($company);
+        if ($requested==='sales-report') {
+            $query=DB::table('accounting_invoices as i')->join('accounting_journals as j','j.id','=','i.journal_id')->leftJoin('accounting_journals as r','r.reversal_of','=','j.id')->where('i.company_id',$company)->where('i.kind','sale')->whereIn('j.status',['posted','reversed'])->whereBetween('i.posting_date',[$v['from'],$v['to']])->where(fn($q)=>$q->whereNull('r.id')->orWhere('r.posting_date','>',$v['to']));
+            if(!empty($v['party_id'])) $query->where('i.party_id',$v['party_id']);
+            $total=(int)(clone $query)->sum('i.total_minor');
+            $query->select(['i.id','i.number','i.party_name','i.posting_date','i.due_date','i.total_minor'])->orderBy('i.posting_date')->orderBy('i.id');
+            if($r->input('export')==='csv')return $this->csv($r,$company,$requested,['Invoice','Customer','Date','Due date','Total ('.$book->currency.')'],$query->get()->map(fn($i)=>[$i->number,$i->party_name,$i->posting_date,$i->due_date,Ledger::money($i->total_minor)]));
+            $entries=$query->paginate(30);$entries->getCollection()->transform(fn($i)=>(array)$i+['total'=>Ledger::money($i->total_minor)]);
+            return ['currency'=>$book->currency,'entries'=>$entries,'total'=>Ledger::money($total)];
+        }
         if($v['report']==='cashflow'){
             $result=\App\Modules\Accounting\Services\CashFlow::report($company,$v['from'],$v['to'],$book->currency);
             if($r->input('export')==='csv')return $this->csv($r,$company,'cashflow',['Date','Journal','Description','Activity','Cash in','Cash out','Net'],collect($result['rows'])->map(fn($row)=>[$row['date'],$row['number'],$row['description'],$row['category'],$row['inflow'],$row['outflow'],$row['net']]));
@@ -50,6 +69,14 @@ class FinancialReportsController
             return $result;
         }
         $q = DB::table('accounting_journal_lines as l')->join('accounting_journals as j', 'j.id', '=', 'l.journal_id')->join('accounting_accounts as a', 'a.id', '=', 'l.account_id')->where('j.company_id', $company)->whereIn('j.status', ['posted', 'reversed']);
+        if(in_array($requested,['customer-ledger','supplier-ledger'])) {
+            $partyKind=$requested==='customer-ledger'?'customer':'supplier';
+            $q->join('accounting_parties as p',function($join){$join->on('p.id','=','l.party_id')->on('p.company_id','=','j.company_id');})->where('p.kind',$partyKind);
+        }
+        if($requested==='expense-report')$q->where('a.root_type','Expense');
+        if($requested==='income-report')$q->where('a.root_type','Income');
+        if($requested==='cash-book')$q->where('a.account_type','Cash');
+        if($requested==='bank-book')$q->where('a.account_type','Bank');
         if (! empty($v['account_id'])) {
             abort_unless(DB::table('accounting_accounts')->where('company_id', $company)->where('id', $v['account_id'])->where('is_group', false)->exists(), 422, 'Select a ledger account in this company.');
         }
@@ -65,11 +92,12 @@ class FinancialReportsController
             $opening = (int) (clone $q)->where('j.posting_date', '<', $v['from'])->selectRaw('COALESCE(SUM(l.debit_minor-l.credit_minor),0) as amount')->value('amount');
             $period = (clone $q)->whereBetween('j.posting_date', [$v['from'], $v['to']]);
             $total = (clone $period)->selectRaw('COALESCE(SUM(l.debit_minor),0) as debit, COALESCE(SUM(l.credit_minor),0) as credit')->first();
-            $query = $period->select(['l.id', 'j.posting_date', 'j.number', 'j.status', 'j.remarks', 'a.code', 'a.name', 'l.debit_minor', 'l.credit_minor','l.currency','l.exchange_rate','l.foreign_debit_minor','l.foreign_credit_minor'])->selectRaw('? + SUM(l.debit_minor-l.credit_minor) OVER (ORDER BY j.posting_date,j.id,l.position ROWS UNBOUNDED PRECEDING) as balance_minor', [$opening])->orderBy('j.posting_date')->orderBy('j.id')->orderBy('l.position');
+            $query = $period->select(['l.id', 'l.party_id', 'j.posting_date', 'j.number', 'j.status', 'j.remarks', 'a.code', 'a.name', 'l.debit_minor', 'l.credit_minor','l.currency','l.exchange_rate','l.foreign_debit_minor','l.foreign_credit_minor'])->selectRaw('? + SUM(l.debit_minor-l.credit_minor) OVER (ORDER BY j.posting_date,j.id,l.position ROWS UNBOUNDED PRECEDING) as balance_minor', [$opening])->orderBy('j.posting_date')->orderBy('j.id')->orderBy('l.position');
             $result += ['opening' => Ledger::money($opening), 'opening_debit' => Ledger::money(max(0, $opening)), 'opening_credit' => Ledger::money(max(0, -$opening)), 'debit' => Ledger::money((int) $total->debit), 'credit' => Ledger::money((int) $total->credit), 'closing' => Ledger::money($opening + (int) $total->debit - (int) $total->credit)];
             if ($r->input('export') === 'csv') {
                 return $this->csv($r, $company, $v['report'], ['Date', 'Journal', 'Account code', 'Account', 'Description', 'Debit', 'Credit', 'Running debit balance','Original currency','Original debit','Original credit','Exchange rate'], $query->get()->map(fn ($l) => [$l->posting_date, $l->number, $l->code, $l->name, $l->remarks, Ledger::money($l->debit_minor), Ledger::money($l->credit_minor), Ledger::money($l->balance_minor),$l->currency,isset($l->foreign_debit_minor)?Ledger::money($l->foreign_debit_minor):'',isset($l->foreign_credit_minor)?Ledger::money($l->foreign_credit_minor):'',$l->exchange_rate]));
             }
+            if(in_array($requested,['customer-ledger','supplier-ledger']))$query->addSelect('p.name as party_name');
             $rows = $query->paginate(30, ['*'], 'page', (int)($v['page']??1));
             $rows->setCollection($rows->getCollection()->map(fn ($l) => array_merge((array) $l, ['debit' => Ledger::money($l->debit_minor), 'credit' => Ledger::money($l->credit_minor), 'balance' => Ledger::money($l->balance_minor)])));
 

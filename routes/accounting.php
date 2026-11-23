@@ -20,6 +20,7 @@ Route::get('/accounting/journals/{id}/print', [\App\Modules\Accounting\Http\Cont
 Route::get('/accounting/vouchers/{id}/print', [\App\Modules\Accounting\Http\Controllers\JournalController::class, 'printVoucher'])->whereNumber('id');
 Route::get('/accounting/invoices/{id}/print', [\App\Modules\Accounting\Http\Controllers\TradeController::class, 'printInvoice'])->whereNumber('id');
 Route::prefix('accounting/api')->middleware(\App\Modules\Accounting\Http\Middleware\RestrictImprestOfficer::class)->group(function () {
+    Route::get('report-parties',[\App\Modules\Accounting\Http\Controllers\FinancialReportsController::class,'parties']);
     Route::get('journal-parties',[\App\Modules\Accounting\Http\Controllers\JournalController::class,'parties']);
     Route::get('items',[\App\Modules\Accounting\Http\Controllers\ItemController::class,'index']);
     Route::post('items',[\App\Modules\Accounting\Http\Controllers\ItemController::class,'save']);
