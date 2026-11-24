@@ -52,6 +52,18 @@ class FocusProductTest extends TestCase
         $this->withSession(['judibas_admin' => true])->getJson('/focus-to-do/api/data')->assertOk()->assertJsonCount($superTasks, 'tasks');
     }
 
+    public function test_non_recurring_completion_is_explicit_idempotent_and_survives_reload(): void
+    {
+        $user=$this->person();$id=$this->task($user,['due_date'=>now()->toDateString(),'repeat'=>'none']);
+        foreach([true,true,false,false,true] as $completed){
+            $this->postJson("/focus-to-do/api/tasks/$id/complete",['completed'=>$completed])->assertOk();
+            $data=$this->getJson('/focus-to-do/api/data')->assertOk()->json();
+            $task=collect($data['tasks'])->firstWhere('id',$id);
+            $this->assertSame($completed,(bool)$task['completed_at']);
+            $this->assertCount(1,$data['tasks']);
+        }
+    }
+
     public function test_repeat_completion_is_idempotent_and_reopening_does_not_duplicate(): void
     {
         $u = $this->person();
