@@ -913,9 +913,9 @@
 
 .pms-hierarchy-nav .pms-tree-node:last-child::after{content:'';position:absolute;left:-14px;top:20px;bottom:0;width:2px;background:var(--pms-surface);pointer-events:none}
 
-/* Keep hierarchy rows compact while title attributes expose the complete name. */
-.pms-hierarchy-nav .pms-tree-label{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;overflow-wrap:normal}
-.pms-hierarchy-nav .pms-hierarchy-department>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;overflow-wrap:normal}
+/* Keep full hierarchy names readable without relying on hover tooltips. */
+.pms-hierarchy-nav .pms-tree-label{display:block;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;line-height:1.45}
+.pms-hierarchy-nav .pms-hierarchy-department>span{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;line-height:1.45}
 .pms-hierarchy-nav .pms-tree-chevron,.pms-hierarchy-nav .pms-tree-eye{flex-shrink:0}
 
 .pms-hierarchy-heading{align-items:flex-start;gap:20px;flex-wrap:wrap}

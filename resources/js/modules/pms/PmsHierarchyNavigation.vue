@@ -74,4 +74,8 @@ onUnmounted(()=>{document.removeEventListener('pointerdown',outside);document.re
 .pms-hierarchy-nav :deep(.pms-tree-children .pms-tree-children){margin-left:8px;padding-left:10px;min-width:0}
 .pms-hierarchy-nav :deep(.pms-tree-node::before){left:-10px;width:10px}
 .pms-hierarchy-nav :deep(.pms-tree-node:last-child::after){left:-11px}
+/* The connected tree owns its label layout, including nested node components. */
+.pms-hierarchy-nav :deep(.pms-tree-label),
+.pms-hierarchy-nav :deep(.pms-hierarchy-department>span){white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;line-height:1.45}
+.pms-hierarchy-nav :deep(summary){height:auto;align-items:flex-start}
 </style>

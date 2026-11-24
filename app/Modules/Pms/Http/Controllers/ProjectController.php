@@ -434,7 +434,7 @@ class ProjectController extends Controller
         $request->merge(['name' => preg_replace('/\s+/u', ' ', trim((string) $request->input('name')))]);
 
         $validatedData = $request->validate([
-            'name' => ['required', 'string', 'max:255', function ($attribute, $value, $fail) {
+            'name' => ['required', 'string', 'max:255', new \App\Modules\Pms\Rules\NameWordLimit(), function ($attribute, $value, $fail) {
                 if (Projects::where('name_key', Projects::normalizeName($value))->exists()) {
                     $fail('A project with this name already exists.');
                 }
@@ -647,7 +647,7 @@ class ProjectController extends Controller
         $request->merge(['name' => preg_replace('/\s+/u', ' ', trim((string) $request->input('name')))]);
 
         $validatedData = $request->validate([
-            'name' => ['required', 'string', 'max:255', function ($attribute, $value, $fail) use ($id) {
+            'name' => ['required', 'string', 'max:255', new \App\Modules\Pms\Rules\NameWordLimit(Projects::whereKey($id)->value('name')), function ($attribute, $value, $fail) use ($id) {
                 if (Projects::where('name_key', Projects::normalizeName($value))->whereKeyNot($id)->exists()) {
                     $fail('A project with this name already exists.');
                 }
