@@ -21,7 +21,7 @@ const today=new Date().toLocaleDateString('en-CA'),data=ref<any>(null),editor=re
 const cash=computed(()=>props.accounts.filter(a=>!a.imprest_fund&&a.active&&!a.is_group&&a.root_type==='Asset'&&a.account_type==='Cash'));
 const quickEntry=ref(false);
 const quickRoot=computed(()=>receipt.value?'Income':'Expense');
-const offsets=computed(()=>props.accounts.filter(a=>!a.imprest_fund&&a.active&&!a.is_group&&(!quickEntry.value||a.root_type===quickRoot.value)&&!['Cash','Bank'].includes(a.account_type)&&(!['Receivable','Payable'].includes(a.account_type)||a.party_kind===(receipt.value?'customer':'supplier'))));
+const offsets=computed(()=>props.accounts.filter(a=>!a.imprest_fund&&a.active&&!a.is_group&&(!quickEntry.value||a.root_type===quickRoot.value)&&!['Cash','Bank'].includes(a.account_type)&&(!['Receivable','Payable'].includes(a.account_type)||a.account_type===(receipt.value?'Receivable':'Payable'))));
 const savedSignature=ref('');
 function signature(e:any){return JSON.stringify([e.currency,e.exchange_rate,e.posting_date,e.voucher_person,e.reference||'',e.remarks||'',e.cash_id,e.offset_id,String(e.amount)]);}
 function review(){formError.value='';if(signature(editor.value)!==savedSignature.value){formError.value='Save the draft changes before reviewing posting.';return;}confirm.value='post';}

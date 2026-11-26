@@ -6,6 +6,21 @@ use Illuminate\Support\Facades\DB;
 
 class PartyAccounts
 {
+    // Called inside the company-locked voucher transaction; failed saves roll back contacts too.
+    public static function forLedger(int $company, object $account): object
+    {
+        abort_unless((int)$account->company_id===$company && $account->active && !$account->is_group,422,'Choose an active ledger account in this company.');
+        $kind=$account->account_type==='Receivable'?'customer':'supplier';
+        $party=DB::table('accounting_parties')->where('company_id',$company)->where('account_id',$account->id)->first();
+        if($party){
+            abort_unless($party->active && $party->kind===$kind,422,'The linked customer or supplier is inactive or has a mismatched type.');
+            return $party;
+        }
+        // Never guess a same-name contact: its existing account must remain unchanged.
+        $id=DB::table('accounting_parties')->insertGetId(['company_id'=>$company,'account_id'=>$account->id,'kind'=>$kind,'name'=>$account->name,'active'=>true,'created_at'=>now(),'updated_at'=>now()]);
+        return DB::table('accounting_parties')->where('id',$id)->first();
+    }
+
     public static function sync(int $company, int $id): ?int
     {
         Ledger::lock($company);

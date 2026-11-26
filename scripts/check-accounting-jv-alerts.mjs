@@ -29,7 +29,7 @@ try{
  await page.goto('http://accounting-preview.test/accounting?company_id=51#journals');
  await page.getByRole('button',{name:'Create journal',exact:false}).click();
  const first=page.locator('select[aria-label="Account line 1"]'),second=page.locator('select[aria-label="Account line 2"]');
- const options=await first.locator('option').allTextContents();assert(options.some(v=>v.includes('XYZ Customer')));assert(!options.some(v=>v.includes('Generic receivables')));
+ const options=await first.locator('option').allTextContents();assert(options.some(v=>v.includes('XYZ Customer')));assert(options.some(v=>v.includes('Generic receivables')));
  await first.selectOption('11',{force:true});await second.selectOption('12',{force:true});
  await expect(page.locator('select[aria-label^="Customer or supplier line"]')).toHaveCount(0);
  const money=page.locator('.ac-money-input');await money.nth(0).fill('1000');await money.nth(3).fill('1000');

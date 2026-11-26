@@ -62,8 +62,7 @@ class JournalController
             foreach($v['lines'] as &$inputLine){
                 $account=DB::table('accounting_accounts')->where('company_id',$company)->where('id',$inputLine['account_id'])->first();
                 if($account&&in_array($account->account_type,['Receivable','Payable'],true)){
-                    $party=DB::table('accounting_parties')->where('company_id',$company)->where('account_id',$account->id)->where('active',true)->where('kind',$account->account_type==='Receivable'?'customer':'supplier')->first();
-                    abort_unless($party,422,'Select the individual customer or supplier linked account, rather than the generic Receivable/Payable control account.');
+                    $party=\App\Modules\Accounting\Services\PartyAccounts::forLedger($company,$account);
                     abort_if(!empty($inputLine['party_id'])&&(int)$inputLine['party_id']!==(int)$party->id,422,'This ledger account belongs to a different customer or supplier.');
                     $inputLine['party_id']=$party->id;
                 }

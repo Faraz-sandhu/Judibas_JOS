@@ -30,7 +30,7 @@ function signature(j:any){return JSON.stringify([j.currency,j.exchange_rate,j.po
 function reviewPosting(){if(signature(editor.value)!==savedSignature.value){formError.value='Save the draft changes before reviewing posting.';return;}dialog.value='post';}
 const titles:Record<string,string>={journals:'Journal entries',ledger:'General Ledger',trial:'Trial Balance',profit:'Profit and Loss',balance:'Balance Sheet',books:'Company books',audit:'Audit history',receivables:'Accounts receivable',payables:'Accounts payable'};
 const aging=computed(()=>['receivables','payables'].includes(props.section));
-const ledgerAccounts=computed(()=>props.accounts.filter(a=>!a.imprest_fund&&!a.is_group&&a.active&&(!['Receivable','Payable'].includes(a.account_type)||!!a.party_kind)));
+const ledgerAccounts=computed(()=>props.accounts.filter(a=>!a.imprest_fund&&!a.is_group&&a.active));
 const allLedgers=computed(()=>props.accounts.filter(a=>!a.is_group));
 const trialColumns=ref(initialParams.get('trial_columns')==='2'?'2':'6'),profitBasis=ref(initialParams.get('basis')==='cash'?'cash':'accrual');
 const trialFields=computed(()=>trialColumns.value==='2'?[{key:'closing_debit',label:'Closing debit'},{key:'closing_credit',label:'Closing credit'}]:[{key:'opening_debit',label:'Opening debit'},{key:'opening_credit',label:'Opening credit'},{key:'debit',label:'Period debit'},{key:'credit',label:'Period credit'},{key:'closing_debit',label:'Closing debit'},{key:'closing_credit',label:'Closing credit'}]);

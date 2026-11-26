@@ -23,7 +23,7 @@ const requiresApproval=computed(()=>needsApproval(props.book,editor.value?.kind|
 const spec=computed(()=>types.find(t=>t.kind===editor.value?.kind)||types[0]);
 const pending=computed(()=>editor.value?.approval&&!['returned','withdrawn'].includes(editor.value.approval.stage));
 const editable=computed(()=>editor.value?.status==='draft'&&!pending.value&&can(spec.value.group+(editor.value.id?'.update':'.create')));
-const ledgers=computed(()=>props.accounts.filter(a=>!a.imprest_fund&&a.active&&!a.is_group&&(!['Receivable','Payable'].includes(a.account_type)||a.party_kind===(spec.value.receipt?'customer':'supplier'))));
+const ledgers=computed(()=>props.accounts.filter(a=>!a.imprest_fund&&a.active&&!a.is_group&&(!['Receivable','Payable'].includes(a.account_type)||a.account_type===(spec.value.receipt?'Receivable':'Payable'))));
 const settlements=computed(()=>ledgers.value.filter(a=>spec.value.kind==='contra'?a.root_type==='Asset'&&['Cash','Bank'].includes(a.account_type):spec.value.settlement?a.root_type==='Asset'&&a.account_type===spec.value.settlement:['Asset','Liability'].includes(a.root_type)));
 const offsets=computed(()=>ledgers.value.filter(a=>spec.value.kind==='contra'?a.id!==editor.value?.settlement_id&&a.root_type==='Asset'&&['Cash','Bank'].includes(a.account_type):!['Cash','Bank'].includes(a.account_type)&&(spec.value.settlement||a.root_type===(spec.value.receipt?'Income':'Expense'))));
 const minor=(v:any)=>{const text=String(v||'0');if(!/^\d{1,10}(\.\d{1,2})?$/.test(text))return 0;const [whole,fraction='']=text.split('.');return Number(whole)*100+Number(fraction.padEnd(2,'0'));};
