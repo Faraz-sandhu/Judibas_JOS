@@ -62,14 +62,20 @@ class JournalController
             foreach($v['lines'] as &$inputLine){
                 $account=DB::table('accounting_accounts')->where('company_id',$company)->where('id',$inputLine['account_id'])->first();
                 if($account&&in_array($account->account_type,['Receivable','Payable'],true)){
-                    $party=\App\Modules\Accounting\Services\PartyAccounts::forLedger($company,$account);
+                    $party=DB::table('accounting_parties')->where('company_id',$company)->where('account_id',$account->id)->first();
+                    if(!$party){
+                        abort_if(!empty($inputLine['party_id']),422,'This account is not linked to a customer or supplier.');
+                        $inputLine['party_id']=null;
+                        continue;
+                    }
+                    abort_unless($party->active && $party->kind===($account->account_type==='Receivable'?'customer':'supplier'),422,'The linked customer or supplier is inactive or has a mismatched type.');
                     abort_if(!empty($inputLine['party_id'])&&(int)$inputLine['party_id']!==(int)$party->id,422,'This ledger account belongs to a different customer or supplier.');
                     $inputLine['party_id']=$party->id;
                 }
             }
             unset($inputLine);
             $fx=Currency::context($company,$v);$foreign=$fx['currency']!==$book->currency;
-            $lines = $foreign?Currency::journalLines($company,$v['lines'],$fx):Ledger::lines($company,$v['lines']);
+            $lines = $foreign?Currency::journalLines($company,$v['lines'],$fx,true):Ledger::lines($company,$v['lines'],true);
             if(!$foreign)foreach($lines as $line){$account=DB::table('accounting_accounts')->find($line['account_id']);Currency::account($account,$book->currency,$company);}
             \App\Modules\Accounting\Services\ExpenseVoucherHours::enforce($r, $book, $v['kind'], $lines);
             Ledger::validateCashVoucher($company, $v['kind'], $lines, $v['voucher_person'] ?? null);

@@ -472,23 +472,17 @@ class AccountingLedgerTest extends TestCase
         $this->report('ledger',['account_id'=>$liability])->assertOk()->assertJsonPath('closing','0.00');
     }
 
-    public function test_auto_party_mapping_reuses_contacts_and_rolls_back_failed_vouchers(): void
+    public function test_unlinked_manual_vouchers_never_create_customers_or_suppliers(): void
     {
         $body=$this->body('10.00');
         $body['lines'][0]['account_id']=$this->accounts['1130'];
-        $body['lines'][1]['credit']='9.00';
-        $this->postJson('/accounting/api/journals',$body)->assertUnprocessable();
-        $this->assertSame(0,DB::table('accounting_parties')->where('company_id',$this->company)->where('account_id',$this->accounts['1130'])->count());
-        $body['lines'][1]['credit']='10.00';
-        $first=$this->create($body,false);
+        $this->create($body);
         $body['request_key']=(string) \Illuminate\Support\Str::uuid();
-        $this->create($body,false);
-        $parties=DB::table('accounting_parties')->where('company_id',$this->company)->where('account_id',$this->accounts['1130']);
-        $this->assertSame(1,$parties->count());
-        $parties->update(['active'=>false]);
+        $this->create($body);
+        $this->assertSame(0,DB::table('accounting_parties')->where('company_id',$this->company)->count());
         $body['request_key']=(string) \Illuminate\Support\Str::uuid();
+        $body['lines'][0]['party_id']=999999999;
         $this->postJson('/accounting/api/journals',$body)->assertUnprocessable();
-        $this->assertSame(1,$parties->count());
     }
 
     public function test_manual_cash_bank_vouchers_accept_unlinked_receivable_payable_accounts(): void
@@ -503,7 +497,7 @@ class AccountingLedgerTest extends TestCase
             $journal=$this->create($this->body('10.00',['kind'=>$kind,'voucher_person'=>'Manual account adjustment','lines'=>[
                 ['account_id'=>$this->accounts[$cash],'debit'=>$receipt?'10.00':'0.00','credit'=>$receipt?'0.00':'10.00'],
                 ['account_id'=>$control,'debit'=>$receipt?'0.00':'10.00','credit'=>$receipt?'10.00':'0.00']]]));
-            $this->assertDatabaseHas('accounting_journal_lines',['journal_id'=>$journal['id'],'account_id'=>$control,'party_id'=>DB::table('accounting_parties')->where('company_id',$this->company)->where('account_id',$control)->value('id')]);
+            $this->assertDatabaseHas('accounting_journal_lines',['journal_id'=>$journal['id'],'account_id'=>$control,'party_id'=>null]);
         }
     }
 
@@ -632,7 +626,7 @@ class AccountingLedgerTest extends TestCase
             $party=$this->postJson('/accounting/api/parties',['company_id'=>$this->company,'kind'=>$code==='1130'?'customer':'supplier','name'=>'JV party '.$code,'active'=>true])->assertOk()->json();
             $party=DB::table('accounting_parties')->where('company_id',$this->company)->where('name','JV party '.$code)->first();
             $generic=$this->create($body);
-            $this->assertDatabaseHas('accounting_journal_lines',['journal_id'=>$generic['id'],'account_id'=>$this->accounts[$code],'party_id'=>DB::table('accounting_parties')->where('company_id',$this->company)->where('account_id',$this->accounts[$code])->value('id')]);
+            $this->assertDatabaseHas('accounting_journal_lines',['journal_id'=>$generic['id'],'account_id'=>$this->accounts[$code],'party_id'=>null]);
             $body['request_key']=(string) \Illuminate\Support\Str::uuid();
             $body['lines'][0]['account_id']=$party->account_id;
             $journal=$this->create($body);

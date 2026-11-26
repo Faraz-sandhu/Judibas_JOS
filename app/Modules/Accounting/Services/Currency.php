@@ -77,9 +77,9 @@ class Currency
         }
     }
 
-    public static function journalLines(int $company, array $input, array $context): array
+    public static function journalLines(int $company, array $input, array $context, bool $allowUnlinked = false): array
     {
-        $lines = Ledger::lines($company, $input);
+        $lines = Ledger::lines($company, $input, $allowUnlinked);
         $debit = $credit = 0;
         foreach ($lines as &$line) {
             $a = DB::table('accounting_accounts')->find($line['account_id']);

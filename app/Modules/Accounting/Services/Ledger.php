@@ -46,7 +46,7 @@ class Ledger
         abort_if(!$allowFutureDraft && $date > now()->toDateString(), 422, 'Future-dated entries cannot be posted.');
     }
 
-    public static function lines(int $company, array $input): array
+    public static function lines(int $company, array $input, bool $allowUnlinked = false): array
     {
         $lines = [];
         $debit = $credit = 0;
@@ -59,7 +59,7 @@ class Ledger
                 $mapped = DB::table('accounting_parties')->where('company_id',$company)->where('account_id',$account->id)->first();
                 $partyId = $mapped?->id ?? ($line['party_id'] ?? null);
                 $party = DB::table('accounting_parties')->where('company_id',$company)->where('id',$partyId)->where('kind',$kind)->where('active',true)->first();
-                abort_unless($party,422,'Select the matching active customer or supplier for the control account.');
+                abort_unless($party || ($allowUnlinked && !$mapped && empty($line['party_id'])),422,'Select the matching active customer or supplier for the control account.');
                 abort_if($mapped && !empty($line['party_id']) && (int)$line['party_id'] !== $mapped->id,422,'This account belongs to a different customer or supplier.');
             }
             $d = self::minor($line['debit']);
@@ -100,7 +100,6 @@ class Ledger
                 abort_if(in_array($account->account_type,['Cash','Bank']),422,'Use a contra voucher for cash/bank transfers.');
                 if (in_array($account->account_type,['Receivable','Payable'],true)) {
                     abort_unless($accountType && $account->account_type===($receipt?'Receivable':'Payable'),422,'Receipts require a customer account; payments require a supplier account.');
-                    abort_unless(DB::table('accounting_parties')->where('company_id',$company)->where('account_id',$account->id)->where('active',true)->where('kind',$receipt?'customer':'supplier')->exists(),422,'Select a customer or supplier linked ledger. Settle an existing invoice from its payment screen.');
                 }
                 if(!$accountType)abort_unless($account->root_type===($receipt?'Income':'Expense'),422,'Select '.($receipt?'Income':'Expense').' accounts for detail lines.');
             }
@@ -157,7 +156,7 @@ class Ledger
         ImprestFunds::guardPost($company, $journal);
         self::checkDate(self::book($company), $journal->posting_date);
         $lines = DB::table('accounting_journal_lines')->where('journal_id', $journal->id)->get()->map(fn ($l) => ['account_id' => $l->account_id, 'debit' => self::money($l->debit_minor), 'credit' => self::money($l->credit_minor), 'description' => $l->description, 'party_id'=>$l->party_id])->all();
-        $validated = self::lines($company, $lines);
+        $validated = self::lines($company, $lines, in_array($journal->kind, array_merge(['general','opening','reversal'], array_keys(VoucherTypes::TYPES)), true));
         $originalLines=DB::table('accounting_journal_lines')->where('journal_id',$journal->id)->get();
         foreach($originalLines as $line){$a=DB::table('accounting_accounts')->find($line->account_id);Currency::account($a,$line->currency??self::book($company)->currency,$company);}
         Currency::checkOutflows($company,$originalLines->map(fn($l)=>(array)$l)->all(),$journal->posting_date);
