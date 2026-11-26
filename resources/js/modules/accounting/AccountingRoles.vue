@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import {useAccountingAlerts} from './useAccountingAlerts';
+import {useAccountingLiveRefresh} from './workspaceRealtime';
 import {ref,computed,onMounted} from 'vue';import AdminDialog from '../../AdminDialog.vue';
 const props=defineProps<{openId?:number;csrf?:string}>(),emit=defineEmits(['notice','changed']);
 const data=ref<any>(null),form=ref<any>(null),busy=ref(false),error=ref(''),search=ref('');
@@ -9,6 +11,8 @@ async function load(){try{const r=await fetch('/accounting/api/roles',{headers:{
 function open(role?:any,copy=false){error.value='';form.value=role?{...role,id:copy?undefined:role.id,name:copy?role.name+' copy':role.name,permissions:[...role.permissions],protected:copy?false:role.protected}:{name:'',description:'',active:true,permissions:[]};}
 async function save(){if(busy.value)return;busy.value=true;error.value='';try{const r=await fetch('/accounting/api/roles',{method:'POST',headers:{Accept:'application/json','Content-Type':'application/json','X-CSRF-TOKEN':props.csrf||''},body:JSON.stringify(form.value)});const d=await r.json();if(!r.ok)throw Error(Object.values(d.errors||{}).flat().join(' ')||d.message);form.value=null;emit('notice',d.message);await load();emit('changed');}catch(e){error.value=(e as Error).message;}finally{busy.value=false;}}
 onMounted(load);
+useAccountingLiveRefresh(()=>load(),()=>!form.value&&!busy.value);
+useAccountingAlerts(error);
 </script>
 <template><section><div class="ac-section-heading"><div><h2>Roles and permissions</h2><p class="muted">Define Accounting responsibilities here. Assign these roles to employees and invitations in Administration.</p></div><button v-if="data?.can_manage" class="button primary" @click="open()">+ Create role</button></div><p v-if="error&&!form" role="alert" class="notice admin-error">{{error}}</p><input v-model="search" type="search" placeholder="Find a role" aria-label="Find Accounting role"><div v-if="data" class="ac-role-grid"><article v-for="role in data.roles.filter((r:any)=>r.name.toLowerCase().includes(search.toLowerCase()))" :key="role.id" class="ac-books-panel"><span class="ac-badge" :class="role.active?'active':'inactive'">{{role.active?'Active':'Inactive'}}</span><h3>{{role.name}}</h3><p class="muted">{{role.description||'Accounting access and responsibilities.'}}</p><p>{{role.permissions.length}} permissions · {{role.assigned_users}} assigned users</p><div class="ac-voucher-actions"><button class="button" @click="open(role)">{{!role.protected&&data.can_manage?'Edit role':'View permissions'}}</button><button v-if="data.can_manage" class="button" @click="open(role,true)">Copy role</button></div><small v-if="role.protected" class="muted">Built-in template — copy to customise.</small></article></div>
 <AdminDialog v-if="form" :title="form.protected?'Role permissions':form.id?'Edit role':'Create role'" :busy="busy" dialog-class="ac-dialog ac-review-dialog ac-role-classic" @close="!busy&&(form=null)">

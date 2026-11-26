@@ -54,6 +54,32 @@ class AccountingTradeTest extends TestCase
         $this->assertSame('Renamed customer',DB::table('accounting_accounts')->find($customer->account_id)->name);
     }
 
+    public function test_manual_receipt_reconciles_receivables_without_falsely_settling_an_invoice():void
+    {
+        $invoice=$this->create($this->body());
+        $account=(int)DB::table('accounting_parties')->where('id',$this->customer)->value('account_id');
+        $j=$this->postJson('/accounting/api/journals',['company_id'=>$this->company,'request_key'=>(string)Str::uuid(),'posting_date'=>now()->toDateString(),'kind'=>'cash_receipt','voucher_person'=>'Customer paid partial balance','lines'=>[
+            ['account_id'=>$this->accounts['1110'],'debit'=>'100.00','credit'=>'0.00'],
+            ['account_id'=>$account,'debit'=>'0.00','credit'=>'100.00']]])->assertOk()->json('journal');
+        $query='/accounting/api/reports?'.http_build_query(['company_id'=>$this->company,'report'=>'receivables','from'=>now()->startOfMonth()->toDateString(),'to'=>now()->toDateString()]);
+        $this->getJson($query)->assertOk()->assertJsonPath('summary.outstanding','250.03');
+        $this->postJson('/accounting/api/journals/'.$j['id'].'/post',['company_id'=>$this->company,'version'=>$j['version']])->assertOk();
+        $this->getJson($query)->assertOk()->assertJsonPath('summary.outstanding','150.03')->assertJsonPath('summary.invoice_outstanding','250.03')->assertJsonPath('summary.unallocated_adjustments','-100.00')->assertJsonPath('rows.0.paid','0.00');
+        $this->assertSame(0,DB::table('accounting_payments')->where('invoice_id',$invoice['id'])->count());
+    }
+
+    public function test_pdc_creation_cannot_be_granted_to_an_ordinary_finance_user():void
+    {
+        $invoice=$this->create($this->body());
+        $u=User::factory()->create(['is_active'=>true]);UserProductAccess::sync($u,['product_slugs'=>['accounts'],'company_ids'=>[$this->company],'accounting_role'=>'senior_finance_manager']);
+        $this->withSession(['judibas_admin'=>false])->actingAs($u);
+        $this->postJson('/accounting/api/cheques',$this->cheque($invoice))->assertForbidden();
+        $this->assertDatabaseMissing('accounting_cheques',['invoice_id'=>$invoice['id']]);
+        $admin=User::factory()->create(['is_active'=>true,'judibas_administrator'=>true]);
+        $this->actingAs($admin)->postJson('/accounting/api/cheques',$this->cheque($invoice))->assertForbidden();
+        $this->assertDatabaseMissing('accounting_cheques',['invoice_id'=>$invoice['id']]);
+    }
+
     private function cheque(array $invoice,array $changes=[]):array
     {
         return array_replace(['company_id'=>$this->company,'request_key'=>(string)Str::uuid(),'invoice_id'=>$invoice['id'],'bank_account_id'=>$this->accounts['1120'],'cheque_number'=>'CH-'.Str::random(10),'drawee_bank'=>'MCB','cheque_date'=>now()->toDateString(),'recorded_date'=>now()->toDateString(),'amount'=>'100.00'],$changes);

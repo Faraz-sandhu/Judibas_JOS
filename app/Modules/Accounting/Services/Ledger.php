@@ -39,11 +39,11 @@ class Ledger
         return GlobalPolicy::apply($book);
     }
 
-    public static function checkDate(object $book, string $date): void
+    public static function checkDate(object $book, string $date, bool $allowFutureDraft = false): void
     {
         abort_if($date < $book->start_date, 422, 'The posting date is before the start of these books.');
         abort_if($book->locked_through && $date <= $book->locked_through, 422, 'This accounting period is locked. Choose an open posting date.');
-        abort_if($date > now()->toDateString(), 422, 'Future-dated entries cannot be posted.');
+        abort_if(!$allowFutureDraft && $date > now()->toDateString(), 422, 'Future-dated entries cannot be posted.');
     }
 
     public static function lines(int $company, array $input): array
@@ -97,7 +97,11 @@ class Ledger
                 $settlements++;
                 abort_unless(in_array($account->root_type,['Asset','Liability']),422,'Use an asset or liability ledger for settlement.');
             }else{
-                abort_if(in_array($account->account_type,['Cash','Bank','Receivable','Payable']),422,'Use invoice payments for customer/supplier control accounts and journals for cash/bank transfers.');
+                abort_if(in_array($account->account_type,['Cash','Bank']),422,'Use a contra voucher for cash/bank transfers.');
+                if (in_array($account->account_type,['Receivable','Payable'],true)) {
+                    abort_unless($accountType && $account->account_type===($receipt?'Receivable':'Payable'),422,'Receipts require a customer account; payments require a supplier account.');
+                    abort_unless(DB::table('accounting_parties')->where('company_id',$company)->where('account_id',$account->id)->where('active',true)->where('kind',$receipt?'customer':'supplier')->exists(),422,'Select a customer or supplier linked ledger. Settle an existing invoice from its payment screen.');
+                }
                 if(!$accountType)abort_unless($account->root_type===($receipt?'Income':'Expense'),422,'Select '.($receipt?'Income':'Expense').' accounts for detail lines.');
             }
             $debitSide=$receipt?$settlement:!$settlement;
@@ -176,8 +180,7 @@ class Ledger
             self::checkDate(self::book($company), $v['posting_date']);
             abort_if($v['posting_date'] < $original->posting_date, 422, 'A reversal cannot be dated before the original entry.');
             ImprestFunds::guardReverse($company, $id, $v['posting_date']);
-            $number = DB::table('accounting_journals')->where('company_id', $company)->count() + 1;
-            $rid = DB::table('accounting_journals')->insertGetId(['company_id' => $company, 'request_key' => (string) \Illuminate\Support\Str::uuid(), 'number' => 'JV-'.str_pad((string) $number, 7, '0', STR_PAD_LEFT), 'posting_date' => $v['posting_date'], 'currency'=>$original->currency,'exchange_rate'=>$original->exchange_rate,'kind' => 'reversal', 'remarks' => 'Reversal of '.$original->number.': '.trim($v['reason']), 'reversal_of' => $id, 'reversal_reason' => trim($v['reason']), 'created_by' => $r->user()?->id, 'created_at' => now(), 'updated_at' => now()]);
+            $rid = DB::table('accounting_journals')->insertGetId(['company_id' => $company, 'request_key' => (string) \Illuminate\Support\Str::uuid(), 'number' => VoucherNumber::next($company,'JV'), 'posting_date' => $v['posting_date'], 'currency'=>$original->currency,'exchange_rate'=>$original->exchange_rate,'kind' => 'reversal', 'remarks' => 'Reversal of '.$original->number.': '.trim($v['reason']), 'reversal_of' => $id, 'reversal_reason' => trim($v['reason']), 'created_by' => $r->user()?->id, 'created_at' => now(), 'updated_at' => now()]);
             $lines = DB::table('accounting_journal_lines')->where('journal_id', $id)->get();
             foreach ($lines as $l) {
                 DB::table('accounting_journal_lines')->insert(['company_id' => $company, 'journal_id' => $rid, 'account_id' => $l->account_id, 'position' => $l->position, 'debit_minor' => $l->credit_minor, 'credit_minor' => $l->debit_minor, 'description' => $l->description, 'party_id' => $l->party_id,'currency'=>$l->currency,'exchange_rate'=>$l->exchange_rate,'foreign_debit_minor'=>$l->foreign_credit_minor,'foreign_credit_minor'=>$l->foreign_debit_minor]);

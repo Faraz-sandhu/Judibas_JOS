@@ -59,13 +59,21 @@ class Permissions
     public static function effective(Request $r): array
     {
         if (! PlatformAccess::product($r, 'accounts')) return [];
-        if (PlatformAccess::administrator($r)) return self::keys();
+        if (PlatformAccess::administrator($r)) return self::postingPolicy($r,self::keys());
         $role = DB::table('accounting_members')->where('user_id', $r->user()->id)->value('role') ?? 'viewer';
         $json = DB::table('accounting_roles')->where('slug', $role)->where('active', true)->value('permissions');
 
         $keys = array_values(array_intersect(json_decode($json ?? '[]', true), self::keys()));
         if (ImprestFunds::restricted($r)) $keys = array_values(array_intersect($keys, self::presets()['junior_finance_officer'][1]));
-        return $keys;
+        return self::postingPolicy($r,$keys);
+    }
+
+    private static function postingPolicy(Request $r,array $keys):array
+    {
+        if(PlatformAccess::super($r))return $keys;
+        $blocked=['journals.post','cash_receipts.post','cash_payments.post','bank_receipts.post','bank_payments.post','expense_vouchers.post','income_vouchers.post','imprest.post'];
+        $blocked[]='cheques.create';
+        return array_values(array_diff($keys,$blocked));
     }
 
     public static function can(Request $r, string $permission): bool { return in_array($permission, self::effective($r), true); }

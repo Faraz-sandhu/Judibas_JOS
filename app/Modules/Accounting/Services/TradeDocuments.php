@@ -32,8 +32,7 @@ class TradeDocuments
     public static function journal(Request $r, int $company, string $date, string $remarks, array $lines): int
     {
         Ledger::checkDate(Ledger::book($company), $date);
-        $number = DB::table('accounting_journals')->where('company_id', $company)->count() + 1;
-        $id = DB::table('accounting_journals')->insertGetId(['company_id' => $company, 'request_key' => (string) Str::uuid(), 'number' => 'JV-'.str_pad((string) $number, 7, '0', STR_PAD_LEFT), 'posting_date' => $date, 'remarks' => $remarks, 'created_by' => $r->user()?->id, 'created_at' => now(), 'updated_at' => now()]);
+        $id = DB::table('accounting_journals')->insertGetId(['company_id' => $company, 'request_key' => (string) Str::uuid(), 'number' => VoucherNumber::next($company,'JV'), 'posting_date' => $date, 'remarks' => $remarks, 'created_by' => $r->user()?->id, 'created_at' => now(), 'updated_at' => now()]);
         foreach ($lines as $position => $line) {
             DB::table('accounting_journal_lines')->insert($line + ['company_id' => $company, 'journal_id' => $id, 'position' => $position + 1]);
         }

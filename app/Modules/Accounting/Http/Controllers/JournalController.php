@@ -49,13 +49,26 @@ class JournalController
         $id = DB::transaction(function () use ($r, $v, $company) {
             Ledger::lock($company);
             $book = Ledger::book($company);
-            Ledger::checkDate($book, $v['posting_date']);
+            $futureVoucher=$v['posting_date']>now()->toDateString();
+            abort_if($futureVoucher&&!\App\Services\PlatformAccess::super($r),403,'Only Super Admin can create or change a post-dated voucher.');
+            Ledger::checkDate($book, $v['posting_date'], $futureVoucher);
             $q = DB::table('accounting_journals')->where('company_id', $company);
             $old = ! empty($v['id']) ? (clone $q)->where('id', $v['id'])->first() : null;
             abort_if(! empty($v['id']) && ! $old, 404);
+            abort_if($old&&$old->posting_date>now()->toDateString()&&!\App\Services\PlatformAccess::super($r),403,'Only Super Admin can change a post-dated voucher, including its date.');
             abort_if($old && \App\Modules\Accounting\Services\ImprestFunds::movement($old->id),422,'Imprest vouchers cannot be edited here. Cancel the non-posted voucher in Imprest / Petty Cash and create a replacement.');
             abort_if(DB::table('accounting_imprest_funds')->whereIn('account_id',array_column($v['lines'],'account_id'))->exists(),422,'Officer fund accounts can only be used through Imprest / Petty Cash.');
             if ($old) ApprovalFlow::ensureEditable($company, 'journal', $old->id);
+            foreach($v['lines'] as &$inputLine){
+                $account=DB::table('accounting_accounts')->where('company_id',$company)->where('id',$inputLine['account_id'])->first();
+                if($account&&in_array($account->account_type,['Receivable','Payable'],true)){
+                    $party=DB::table('accounting_parties')->where('company_id',$company)->where('account_id',$account->id)->where('active',true)->where('kind',$account->account_type==='Receivable'?'customer':'supplier')->first();
+                    abort_unless($party,422,'Select the individual customer or supplier linked account, rather than the generic Receivable/Payable control account.');
+                    abort_if(!empty($inputLine['party_id'])&&(int)$inputLine['party_id']!==(int)$party->id,422,'This ledger account belongs to a different customer or supplier.');
+                    $inputLine['party_id']=$party->id;
+                }
+            }
+            unset($inputLine);
             $fx=Currency::context($company,$v);$foreign=$fx['currency']!==$book->currency;
             $lines = $foreign?Currency::journalLines($company,$v['lines'],$fx):Ledger::lines($company,$v['lines']);
             if(!$foreign)foreach($lines as $line){$account=DB::table('accounting_accounts')->find($line['account_id']);Currency::account($account,$book->currency,$company);}
@@ -86,8 +99,7 @@ class JournalController
                 (clone $q)->where('id', $id)->update($values);
                 DB::table('accounting_journal_lines')->where('journal_id', $id)->delete();
             } else {
-                $number = (int) (clone $q)->count() + 1;
-                $id = DB::table('accounting_journals')->insertGetId($values + ['company_id' => $company, 'request_key' => $v['request_key'], 'number' => (isset(VoucherTypes::TYPES[$v['kind']])?VoucherTypes::TYPES[$v['kind']][0].'-':'JV-').str_pad((string) $number, 7, '0', STR_PAD_LEFT), 'created_by' => $r->user()?->id, 'created_at' => now()]);
+                $id = DB::table('accounting_journals')->insertGetId($values + ['company_id' => $company, 'request_key' => $v['request_key'], 'number' => \App\Modules\Accounting\Services\VoucherNumber::next($company, VoucherTypes::TYPES[$v['kind']][0]??'JV'), 'created_by' => $r->user()?->id, 'created_at' => now()]);
             }
             DB::table('accounting_journal_lines')->insert(array_map(fn ($l) => $l + ['journal_id' => $id], $lines));
             Access::audit($r, $company, $old ? 'Journal draft updated' : 'Journal draft created', 'Journal #'.$id);
@@ -100,6 +112,7 @@ class JournalController
 
     public function post(Request $r, int $id)
     {
+        abort_unless(\App\Services\PlatformAccess::super($r),403,'Only Super Admin can post non-posted vouchers.');
         $v = $r->validate(['company_id' => 'required|integer', 'version' => 'required|integer|min:1']);
         $company = (int) $v['company_id'];
         Access::company($r, $company);

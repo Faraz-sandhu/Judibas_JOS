@@ -33,6 +33,7 @@ class FinancialReportsController
         $v = $r->validate(['company_id' => 'required|integer', 'report' => 'required|in:trial,ledger,profit,balance,receivables,payables,cashflow,customer-ledger,supplier-ledger,expense-report,income-report,sales-report,cash-book,bank-book,aged-receivables,aged-payables', 'from' => 'required|date_format:Y-m-d', 'to' => 'required|date_format:Y-m-d|after_or_equal:from', 'account_id' => 'nullable|integer', 'party_id' => 'nullable|integer', 'page' => 'nullable|integer|min:1', 'export' => 'nullable|in:csv', 'trial_columns' => 'nullable|in:2,6', 'basis' => 'nullable|in:accrual,cash']);
         $company = (int) $v['company_id'];
         $requested=$v['report'];
+        if(in_array($requested,['cash-book','bank-book'],true))abort_unless(\App\Services\PlatformAccess::super($r),403,'Cash Book and Bank Book are available only to Super Admin.');
         $aliases=['customer-ledger'=>'ledger','supplier-ledger'=>'ledger','expense-report'=>'ledger','income-report'=>'ledger','cash-book'=>'ledger','bank-book'=>'ledger','aged-receivables'=>'receivables','aged-payables'=>'payables'];
         $v['report']=$aliases[$requested]??$requested;
         Access::company($r, $company, $requested==='sales-report'?'sales.view':'reports.'.$v['report']);
@@ -184,8 +185,20 @@ class FinancialReportsController
             $totals['outstanding'] += $outstanding;$totals[$bucket] += $outstanding;
             $rows[] = ['id' => $i->id, 'number' => $i->number, 'party_name' => $i->party_name, 'posting_date' => $i->posting_date, 'due_date' => $i->due_date, 'overdue_days' => $days, 'total' => Ledger::money($i->total_minor), 'paid' => Ledger::money((int) $i->paid), 'outstanding' => Ledger::money($outstanding), 'bucket' => $bucket,'original_currency'=>$i->currency??$currency,'original_outstanding'=>Ledger::money(($i->foreign_total_minor??$i->total_minor)-(int)$i->foreign_paid)];
         }
+        $control = DB::table('accounting_journal_lines as l')->join('accounting_journals as j','j.id','=','l.journal_id')->join('accounting_accounts as a','a.id','=','l.account_id')
+            ->where('l.company_id',$company)->where('j.company_id',$company)->where('a.company_id',$company)
+            ->where('a.account_type',$v['report']==='receivables'?'Receivable':'Payable')->whereIn('j.status',['posted','reversed'])->where('j.posting_date','<=',$v['to'])
+            ->selectRaw('COALESCE(SUM(l.debit_minor),0) as debit,COALESCE(SUM(l.credit_minor),0) as credit')->first();
+        $invoiceOutstanding=$totals['outstanding'];
+        $ledgerBalance=$v['report']==='receivables'?(int)$control->debit-(int)$control->credit:(int)$control->credit-(int)$control->debit;
+        $totals['invoice_outstanding']=$invoiceOutstanding;
+        $totals['ledger_balance']=$ledgerBalance;
+        $totals['unallocated_adjustments']=$ledgerBalance-$invoiceOutstanding;
+        $totals['ledger_debit']=(int)$control->debit;$totals['ledger_credit']=(int)$control->credit;
+        // Ageing buckets remain invoice based; the main receivable/payable total reconciles to the ledger.
+        if(!str_starts_with((string)$r->input('report'),'aged-'))$totals['outstanding']=$ledgerBalance;
         if ($r->input('export') === 'csv') {
-            return $this->csv($r, $company, $v['report'], ['Invoice', 'Contact', 'Date', 'Due date', 'Overdue days', 'Invoice total', 'Paid', 'Outstanding','Original currency','Original outstanding'], collect($rows)->map(fn ($i) => [$i['number'], $i['party_name'], $i['posting_date'], $i['due_date'], $i['overdue_days'], $i['total'], $i['paid'], $i['outstanding'],$i['original_currency'],$i['original_outstanding']]));
+            return $this->csv($r, $company, $v['report'], ['Invoice', 'Contact', 'Date', 'Due date', 'Overdue days', 'Invoice total', 'Paid', 'Outstanding','Original currency','Original outstanding'], collect($rows)->map(fn ($i) => [$i['number'], $i['party_name'], $i['posting_date'], $i['due_date'], $i['overdue_days'], $i['total'], $i['paid'], $i['outstanding'],$i['original_currency'],$i['original_outstanding']])->concat($ledgerBalance!==$invoiceOutstanding?collect(['Open invoice balance'=>$invoiceOutstanding,'Unallocated receipts / other adjustments'=>$ledgerBalance-$invoiceOutstanding,'Net ledger balance'=>$ledgerBalance])->map(fn($amount,$label)=>['',$label,'','','','','',Ledger::money($amount),'',''])->values():collect()));
         }
         $page = (int) ($v['page'] ?? 1);
 

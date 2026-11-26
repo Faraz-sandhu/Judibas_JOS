@@ -108,7 +108,9 @@ class ImprestController
         return DB::transaction(function () use ($r, $v, $company, $type) {
             Ledger::lock($company);
             $book = Ledger::book($company);
-            Ledger::checkDate($book, $v['posting_date']);
+            $futureVoucher=$v['posting_date']>now()->toDateString();
+            abort_if($futureVoucher&&!\App\Services\PlatformAccess::super($r),403,'Only Super Admin can create or change a post-dated voucher.');
+            Ledger::checkDate($book, $v['posting_date'], $futureVoucher);
             $fund = DB::table('accounting_imprest_funds')->where('company_id', $company)->find($v['fund_id']);
             abort_unless($fund && $fund->active, 422, 'Choose an active fund in this company.');
             if ($type === 'spending' && ! Permissions::can($r, 'imprest.manage')) {
@@ -141,8 +143,7 @@ class ImprestController
                 $pending = (int) DB::table('accounting_imprest_movements as m')->join('accounting_journals as j', 'j.id', '=', 'm.journal_id')->join('accounting_journal_lines as l', 'l.journal_id', '=', 'j.id')->where('m.type', 'funding')->where('m.void', false)->where('j.status', 'draft')->where('l.account_id', $account->id)->sum('l.credit_minor');
                 abort_if($amount > $balance - $pending, 422, 'Company source funds are insufficient after pending imprest advances.');
             }
-            $number = DB::table('accounting_journals')->where('company_id', $company)->count() + 1;
-            $id = DB::table('accounting_journals')->insertGetId(['company_id' => $company, 'request_key' => $v['request_key'], 'number' => ($type === 'funding' ? 'IAV-' : 'PCV-').str_pad((string) $number, 7, '0', STR_PAD_LEFT), 'posting_date' => $v['posting_date'], 'currency' => $book->currency, 'exchange_rate' => '1.000000', 'kind' => $type === 'funding' ? 'general' : 'cash_payment', 'voucher_person' => $person, 'remarks' => trim($v['remarks'] ?? ''), 'prepared_by' => $r->user()?->id, 'created_by' => $r->user()?->id, 'created_at' => now(), 'updated_at' => now()]);
+            $id = DB::table('accounting_journals')->insertGetId(['company_id' => $company, 'request_key' => $v['request_key'], 'number' => \App\Modules\Accounting\Services\VoucherNumber::next($company,$type==='funding'?'IAV':'PCV'), 'posting_date' => $v['posting_date'], 'currency' => $book->currency, 'exchange_rate' => '1.000000', 'kind' => $type === 'funding' ? 'general' : 'cash_payment', 'voucher_person' => $person, 'remarks' => trim($v['remarks'] ?? ''), 'prepared_by' => $r->user()?->id, 'created_by' => $r->user()?->id, 'created_at' => now(), 'updated_at' => now()]);
             DB::table('accounting_journal_lines')->insert(array_map(fn ($l) => $l + ['journal_id' => $id], $lines));
             DB::table('accounting_imprest_movements')->insert(['fund_id' => $fund->id, 'journal_id' => $id, 'type' => $type, 'created_at' => now(), 'updated_at' => now()]);
             Access::audit($r, $company, $type === 'funding' ? 'Imprest advance drafted' : 'Petty cash expense drafted', 'Journal #'.$id, ['fund_id' => $fund->id, 'officer_id' => $fund->user_id]);
@@ -153,6 +154,7 @@ class ImprestController
 
     public function post(Request $r, int $id)
     {
+        abort_unless(\App\Services\PlatformAccess::super($r),403,'Only Super Admin can post vouchers.');
         $v = $r->validate(['company_id' => 'required|integer', 'version' => 'required|integer|min:1']);
         $company = (int) $v['company_id'];
         Access::company($r, $company, 'imprest.post');

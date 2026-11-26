@@ -9,3 +9,5 @@ export function useAccountingPermissions(){
   return legacy.value.manage;
  };
 }
+
+export function useAccountingSuperAdmin(){return inject<ComputedRef<boolean>>('accounting-super-admin',computed(()=>false));}

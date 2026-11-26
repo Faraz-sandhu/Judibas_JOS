@@ -8,8 +8,8 @@ use Illuminate\Support\Facades\DB;
 
 class ApprovalFlow
 {
-    public const STAGES = ['paper_ceo'=>'Awaiting CEO-signed copy','finance_review'=>'Finance review','ceo_review'=>'CEO approval','finance_verify'=>'Finance verification','manager_review'=>'Finance Manager posting','posted'=>'Posted','returned'=>'Returned to preparer','withdrawn'=>'Withdrawn'];
-    public const PERMISSIONS = ['paper_ceo'=>'workflow.upload_signed','finance_review'=>'workflow.finance_review','ceo_review'=>'workflow.ceo_approve','finance_verify'=>'workflow.finance_verify','manager_review'=>'workflow.finalize'];
+    public const STAGES = ['paper_ceo'=>'Awaiting CEO-signed copy','finance_review'=>'Finance review','ceo_review'=>'CEO approval','finance_verify'=>'Finance verification','head_review'=>'Judibas GOC Finance Manager review','officer_confirm'=>'Judibas GOC Finance Officer confirmation','manager_review'=>'Super Admin posting','posted'=>'Posted','returned'=>'Returned to preparer','withdrawn'=>'Withdrawn'];
+    public const PERMISSIONS = ['paper_ceo'=>'workflow.upload_signed','finance_review'=>'workflow.finance_review','ceo_review'=>'workflow.ceo_approve','finance_verify'=>'workflow.finance_verify','head_review'=>'workflow.finalize','officer_confirm'=>'workflow.finance_verify','manager_review'=>'workflow.finalize'];
 
     public static function enabled(int $company,?string $type=null,?int $id=null): bool { return $type!==null&&$id!==null?ApprovalPolicy::required($company,ApprovalPolicy::documentKey($company,$type,$id)):(bool)(DB::table('accounting_books')->where('company_id',$company)->value('approval_required')??false); }
     public static function approval(int $company,string $type,int $id): ?object { return DB::table('accounting_approvals')->where('company_id',$company)->where('document_type',$type)->where('document_id',$id)->first(); }
@@ -20,13 +20,30 @@ class ApprovalFlow
     }
     public static function requirePosting(Request $r,int $company,string $type,int $id,int $version): void
     {
+        if($type==='journal')abort_unless(PlatformAccess::super($r),403,'Only Super Admin can post non-posted vouchers.');
         $approval=self::approval($company,$type,$id);
         if(!self::enabled($company,$type,$id)&&(!$approval||in_array($approval->stage,['returned','withdrawn'])))return;
         $context=$r->attributes->get('accounting_approval');
         if($approval?->workflow_mode==='paper'){
             $copy=self::signedCopy($approval);abort_unless($copy&&\Illuminate\Support\Facades\Storage::disk('local')->exists($copy->path),422,'Attach an available CEO-signed copy for this saved voucher version before posting.');
         }
-        abort_unless($approval&&$approval->stage==='manager_review'&&$approval->document_version===$version&&$context===[$approval->id,$type,$id,$version],422,'This document must complete the approval workflow before posting.');
+        abort_unless($approval&&self::reviewStage($approval)==='manager_review'&&PlatformAccess::super($r)&&$approval->document_version===$version&&$context===[$approval->id,$type,$id,$version],422,'This document must complete the approval workflow before posting.');
+    }
+
+    public static function headReviewer(Request $r,string $permission='workflow.finalize'): bool
+    {
+        if(PlatformAccess::super($r))return true;
+        if(!$r->user()||!Permissions::can($r,$permission))return false;
+        $ids=\App\Services\ProductCompanyAccess::ids($r->user()->id,'accounts');
+        return DB::table('communication_companies')->whereIn('id',$ids)->whereIn(DB::raw('LOWER(TRIM(name))'),['judibas goc','judibas'])->exists();
+    }
+
+    // Existing pending paper approvals require the new checks without rewriting historical rows.
+    public static function reviewStage(object $approval): string
+    {
+        if($approval->workflow_mode!=='paper'||$approval->stage!=='manager_review')return $approval->stage;
+        $boundary=(int)DB::table('accounting_approval_events')->where('approval_id',$approval->id)->whereIn('action',['submit','signed_copy_submitted','signed_copy_replaced'])->max('id');
+        return DB::table('accounting_approval_events')->where('approval_id',$approval->id)->where('id','>',$boundary)->where('from_stage','officer_confirm')->where('to_stage','manager_review')->where('action','approve')->exists()?'manager_review':'head_review';
     }
 
     public static function document(int $company,string $type,int $id): array

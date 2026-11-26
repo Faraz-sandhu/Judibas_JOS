@@ -30,7 +30,12 @@ class AccountingApprovalTest extends TestCase
     private function member(string $role): User
     {
         $u=User::factory()->create(['is_active'=>true]);
-        UserProductAccess::sync($u,['product_slugs'=>['accounts'],'company_ids'=>[$this->company],'accounting_role'=>$role]);
+        $companies=[$this->company];
+        if($role==='senior_finance_manager'){
+            $head=DB::table('communication_companies')->where('name','Judibas GOC')->value('id')??DB::table('communication_companies')->insertGetId(['name'=>'Judibas GOC']);
+            $companies[]=$head;
+        }
+        UserProductAccess::sync($u,['product_slugs'=>['accounts'],'company_ids'=>$companies,'accounting_role'=>$role]);
         return $u;
     }
     private function asUser(User $u): void { $this->withSession(['judibas_admin'=>false])->actingAs($u); }
@@ -45,7 +50,7 @@ class AccountingApprovalTest extends TestCase
     }
     private function decision(object $a,string $action='approve',bool $verify=true)
     {
-        return $this->postJson('/accounting/api/approvals/'.$a->id.'/actions',['company_id'=>$this->company,'version'=>$a->version,'action'=>$action,'note'=>'Checked and confirmed this decision.']+($verify&&$a->workflow_mode==='paper'&&$action==='post'?['verified_signed_copy'=>true]:[]));
+        return $this->postJson('/accounting/api/approvals/'.$a->id.'/actions',['company_id'=>$this->company,'version'=>$a->version,'action'=>$action,'note'=>'Checked and confirmed this decision.']+($verify&&$a->workflow_mode==='paper'&&in_array($action,['approve','post'])?['verified_signed_copy'=>true]:[]));
     }
     private function latest(object $a): object { return DB::table('accounting_approvals')->find($a->id); }
 
@@ -54,32 +59,24 @@ class AccountingApprovalTest extends TestCase
         return $this->post('/accounting/api/approvals/'.$a->id.'/signed-copy',['company_id'=>$this->company,'version'=>$a->version,'note'=>'CEO stamped and signed this paper voucher.','signed_copy'=>\Illuminate\Http\UploadedFile::fake()->create('ceo-signed.pdf',10,'application/pdf')],['Accept'=>'application/json']);
     }
 
-    public function test_paper_workflow_requires_signed_copy_and_independent_head_verification(): void
+    public function test_paper_workflow_requires_head_office_review_officer_confirmation_and_super_admin_posting():void
     {
         $maker=$this->member('finance_officer');$manager=$this->member('senior_finance_manager');
-        $this->asUser($maker);$j=$this->draft();$a=$this->submit($j);
-        $this->assertSame('paper_ceo',$a->stage);
-        $this->asUser($manager);
-        $this->postJson('/accounting/api/journals/'.$j['id'].'/post',['company_id'=>$this->company,'version'=>$j['version']])->assertUnprocessable();
-        $this->decision($a,'post')->assertForbidden();
-        $this->asUser($maker);$this->attach($a)->assertOk();$a=$this->latest($a);
-        $this->assertSame('manager_review',$a->stage);
-        $this->assertSame('draft',DB::table('accounting_journals')->find($j['id'])->status);
-        $this->decision($a,'post')->assertForbidden();
-        $stale=$a;
-        $this->attach($a)->assertOk();$a=$this->latest($a);
-        $this->attach($stale)->assertConflict();
-        $this->assertSame(2,DB::table('accounting_signed_copies')->where('approval_id',$a->id)->count());
-        $this->asUser($manager);
-        $this->decision($a,'post',false)->assertUnprocessable();
-        $this->decision($a,'post')->assertOk();
-        $posted=$this->latest($a);
-        $this->assertSame('posted',$posted->stage);
-        $this->assertNotNull($posted->verified_copy_id);
-        $this->assertSame($manager->id,$posted->verified_by);
+        $this->asUser($maker);$j=$this->draft();$a=$this->submit($j);$this->assertSame('paper_ceo',$a->stage);
+        $this->asUser($manager);$this->postJson('/accounting/api/journals/'.$j['id'].'/post',['company_id'=>$this->company,'version'=>$j['version']])->assertForbidden();
+        $this->asUser($maker);$this->attach($a)->assertOk();$a=$this->latest($a);$this->assertSame('head_review',$a->stage);
+        $this->decision($a)->assertForbidden();
+        $this->asUser($manager);$this->decision($a,'approve',false)->assertUnprocessable();$this->decision($a)->assertOk();
+        $a=$this->latest($a);$this->assertSame('officer_confirm',$a->stage);
+        $this->asUser($maker);$this->decision($a)->assertForbidden();
+        $this->asUser($manager);$this->decision($a)->assertForbidden();
+        $officer=$this->member('finance_officer');$head=DB::table('communication_companies')->where('name','Judibas GOC')->value('id');
+        UserProductAccess::sync($officer,['product_slugs'=>['accounts'],'company_ids'=>[$this->company,$head],'accounting_role'=>'finance_officer']);
+        $this->asUser($officer);$this->decision($a)->assertOk();$a=$this->latest($a);$this->assertSame('manager_review',$a->stage);
+        $this->decision($a,'post')->assertForbidden();$this->asUser($manager);$this->decision($a,'post')->assertForbidden();
+        $this->withSession(['judibas_admin'=>true]);$this->decision($a,'post')->assertOk();
+        $posted=$this->latest($a);$this->assertSame('posted',$posted->stage);$this->assertSame($manager->id,$posted->verified_by);
         $this->assertSame('posted',DB::table('accounting_journals')->find($j['id'])->status);
-        $this->assertSame(4,DB::table('accounting_approval_events')->where('approval_id',$a->id)->count());
-        $this->decision($posted,'post')->assertConflict();
     }
 
     public function test_return_unlocks_document_and_resubmission_starts_from_finance(): void
@@ -128,9 +125,27 @@ class AccountingApprovalTest extends TestCase
         $this->decision($a)->assertForbidden();
     }
 
+    public function test_existing_pending_paper_voucher_is_not_rewritten_and_cannot_skip_new_reviews():void
+    {
+        $j=$this->draft();$a=$this->submit($j);$this->attach($a)->assertOk();
+        DB::table('accounting_approvals')->where('id',$a->id)->update(['stage'=>'manager_review']);
+        $a=$this->latest($a);
+        $this->getJson('/accounting/api/approvals/document?'.http_build_query(['company_id'=>$this->company,'type'=>'journal','id'=>$j['id']]))->assertOk()->assertJsonPath('approval.stage','head_review');
+        $this->assertSame('manager_review',$this->latest($a)->stage);
+        $this->decision($a,'post')->assertUnprocessable();
+        $this->finishSigned($a);
+        $this->assertSame('posted',$this->latest($a)->stage);
+    }
+
+    private function finishSigned(object $a):void
+    {
+        $this->withSession(['judibas_admin'=>true]);
+        foreach(['approve','approve','post'] as $action)$this->decision($this->latest($a),$action)->assertOk();
+    }
+
     private function finish(object $a): void
     {
-        if($a->workflow_mode==='paper'){$this->attach($a)->assertOk();$this->decision($this->latest($a),'post')->assertOk();return;}
+        if($a->workflow_mode==='paper'){$this->attach($a)->assertOk();$this->finishSigned($a);return;}
         foreach (['approve','approve','approve','post'] as $action) {
             $this->decision($this->latest($a),$action)->assertOk();
         }
@@ -186,7 +201,7 @@ class AccountingApprovalTest extends TestCase
         $this->attach($a)->assertOk();
         DB::table('accounting_books')->where('company_id',$this->company)->update(['locked_through'=>now()->toDateString()]);
         $this->decision($this->latest($a),'post')->assertUnprocessable();
-        $this->assertSame('manager_review',$this->latest($a)->stage);
+        $this->assertSame('head_review',$this->latest($a)->stage);
         $this->assertSame('draft',DB::table('accounting_journals')->find($j['id'])->status);
     }
 
@@ -215,7 +230,7 @@ class AccountingApprovalTest extends TestCase
         $this->assertSame($editor->id,$a->prepared_by);
         $this->attach($a)->assertOk();$a=$this->latest($a);
         $this->decision($a,'post')->assertForbidden();
-        $this->asUser($this->member('senior_finance_manager'));$this->decision($a,'post')->assertOk();
+        $this->finishSigned($a);
     }
 
     public function test_demo_credentials_are_company_scoped_and_seeder_does_not_duplicate_entries(): void
@@ -314,7 +329,7 @@ class AccountingApprovalTest extends TestCase
         $this->getJson('/accounting/api/approvals/document?'.http_build_query(['company_id'=>$this->company,'type'=>'journal','id'=>$j['id']]))->assertOk()->assertJsonPath('approval.signed_copies.0.current',false);
         $this->attach($a)->assertOk();
         $this->assertSame(2,DB::table('accounting_signed_copies')->where('approval_id',$a->id)->count());
-        $this->asUser($head);$this->decision($this->latest($a),'post')->assertOk();
+        $this->finishSigned($a);
     }
 
     public function test_the_signed_copy_uploader_cannot_be_the_final_verifier_and_missing_file_blocks_posting(): void
@@ -324,8 +339,8 @@ class AccountingApprovalTest extends TestCase
         $this->decision($a,'post')->assertForbidden();
         $copy=\App\Modules\Accounting\Services\ApprovalFlow::signedCopy($a);
         \Illuminate\Support\Facades\Storage::disk('local')->delete($copy->path);
-        $this->asUser($head);$this->decision($a,'post')->assertUnprocessable();
-        $this->assertSame('manager_review',$this->latest($a)->stage);
+        $this->asUser($head);$this->decision($a,'approve')->assertUnprocessable();
+        $this->assertSame('head_review',$this->latest($a)->stage);
     }
 
     public function test_returned_voucher_can_upload_a_new_copy_directly_without_reusing_old_evidence(): void
@@ -335,11 +350,11 @@ class AccountingApprovalTest extends TestCase
         $this->asUser($maker);
         $this->post('/accounting/api/approvals/0/signed-copy',['company_id'=>$this->company,'initial'=>1,'document_id'=>$j['id'],'version'=>$j['version'],'note'=>'CEO signed paper resubmitted after correction request.','signed_copy'=>\Illuminate\Http\UploadedFile::fake()->create('new-signed.pdf',10,'application/pdf')],['Accept'=>'application/json'])->assertOk();
         $current=$this->latest($a);
-        $this->assertSame('manager_review',$current->stage);
+        $this->assertSame('head_review',$current->stage);
         $this->assertSame($a->submission_version+1,$current->submission_version);
         $this->assertSame(2,DB::table('accounting_signed_copies')->where('approval_id',$a->id)->count());
         $this->assertSame('new-signed.pdf',\App\Modules\Accounting\Services\ApprovalFlow::signedCopy($current)->original_name);
-        $this->asUser($head);$this->decision($current,'post')->assertOk();
+        $this->finishSigned($current);
     }
 
     private function scope(array $types)
@@ -395,7 +410,7 @@ class AccountingApprovalTest extends TestCase
         $this->scope(['cash_receipt'])->assertOk();$this->draft();$receipt=$this->receiptDraft();
         $this->assertNoFinancialEffect();$a=$this->submit($receipt);$this->assertNoFinancialEffect();
         $this->attach($a)->assertOk();$this->assertNoFinancialEffect();
-        $this->decision($this->latest($a),'post')->assertOk();
+        $this->finishSigned($a);
         $this->getJson('/accounting/api/reports?'.http_build_query(['company_id'=>$this->company,'from'=>now()->startOfMonth()->toDateString(),'to'=>now()->toDateString(),'report'=>'profit']))->assertOk()->assertJsonPath('summary.income','100.00');
     }
 

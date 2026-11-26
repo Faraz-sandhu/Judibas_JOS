@@ -19,7 +19,7 @@ class AllCompaniesController
  private function build(Request $r) {
   self::authorize($r);
   $v=$r->validate(['section'=>'required|in:overview,customers,suppliers,sales,purchases,journals,single-vouchers,cash-receipts,cash-payments,chart,ledger,trial,profit,balance,receivables,payables,books,audit,approvals','page'=>'nullable|integer|min:1','search'=>'nullable|string|max:150','from'=>'required|date_format:Y-m-d','to'=>'required|date_format:Y-m-d|after_or_equal:from','status'=>'nullable|in:draft,posted,reversed','basis'=>'nullable|in:cash,accrual','trial_columns'=>'nullable|in:2,6']);
-  $section=$v['section'];$search=$v['search']??'';
+  $section=$v['section'];if($section==='chart')abort_unless(PlatformAccess::super($r),403,'Actual consolidated account balances are available only to Super Admin.');$search=$v['search']??'';
   $permission=['overview'=>'overview.view','customers'=>'customers.view','suppliers'=>'suppliers.view','sales'=>'sales.view','purchases'=>'purchases.view','journals'=>'journals.view','single-vouchers'=>'journals.view','cash-receipts'=>'cash_receipts.view','cash-payments'=>'cash_payments.view','chart'=>'chart.view','books'=>'books.view','audit'=>'audit.view','approvals'=>'workflow.view'][$section]??'reports.'.$section;
   Permissions::require($r,$permission);
   if(in_array($section,['overview','books','chart','ledger','trial','profit','balance','receivables','payables']))return \App\Modules\Accounting\Services\CombinedAccounting::build($r,$section,$v);

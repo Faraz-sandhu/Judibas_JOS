@@ -333,13 +333,13 @@ class AccountingLedgerTest extends TestCase
         $journal = $this->create($this->body('125.50', ['remarks' => '<b>Not HTML</b>']), false);
         $url = '/accounting/journals/'.$journal['id'].'/print?company_id='.$this->company;
         $before = DB::table('accounting_journal_lines')->where('journal_id', $journal['id'])->get()->toJson();
-        $this->get($url.'&version='.$journal['version'].'&auto_print=1')->assertOk()->assertSee('Journal Entry')->assertSee($journal['number'])->assertSee('DRAFT - saved for review')->assertSee('125.50')->assertSee('Cash')->assertSee('&lt;b&gt;Not HTML&lt;/b&gt;', false)->assertDontSee('<b>Not HTML</b>', false)->assertSee("window.addEventListener('load'", false);
+        $this->get($url.'&version='.$journal['version'].'&auto_print=1')->assertOk()->assertSee('Journal Entry')->assertSee($journal['number'])->assertSee('NON-POSTED')->assertSee('A4 landscape')->assertSee('Print journal')->assertDontSee('DRAFT - saved for review')->assertSee('125.50')->assertSee('Cash')->assertSee('&lt;b&gt;Not HTML&lt;/b&gt;', false)->assertDontSee('<b>Not HTML</b>', false)->assertSee("window.addEventListener('load'", false);
         $this->assertDatabaseHas('accounting_journals', ['id' => $journal['id'], 'status' => 'draft']);
         $this->assertSame($before, DB::table('accounting_journal_lines')->where('journal_id', $journal['id'])->get()->toJson());
         $this->assertDatabaseHas('accounting_audits', ['company_id' => $this->company, 'action' => 'Journal print opened', 'subject' => $journal['number']]);
         $posted = $this->postJson('/accounting/api/journals/'.$journal['id'].'/post', ['company_id' => $this->company, 'version' => $journal['version']])->assertOk()->json('journal');
         $this->get($url.'&version='.$journal['version'])->assertStatus(409);
-        $this->get($url.'&version='.$posted['version'])->assertOk()->assertDontSee('DRAFT - saved for review');
+        $this->get($url.'&version='.$posted['version'])->assertOk()->assertSee('class="status posted"',false)->assertDontSee('DRAFT - saved for review');
         $this->postJson('/accounting/api/journals/'.$journal['id'].'/reverse', ['company_id' => $this->company, 'version' => $posted['version'], 'posting_date' => now()->toDateString(), 'reason' => 'Incorrect journal'])->assertOk();
         $this->get($url)->assertOk()->assertSee('REVERSED - this entry has been offset');
     }
@@ -387,6 +387,7 @@ class AccountingLedgerTest extends TestCase
         $this->create($this->body('50.00',['kind'=>'contra','voucher_person'=>'Internal transfer','lines'=>[['account_id'=>$this->accounts['1120'],'debit'=>'50.00','credit'=>'0.00'],['account_id'=>$this->accounts['1110'],'debit'=>'0.00','credit'=>'50.00']]]));
         $report=$this->getJson('/accounting/api/reports?'.http_build_query(['company_id'=>$this->company,'report'=>'cashflow','from'=>$date,'to'=>$date]))->assertOk();
         $report->assertJsonPath('summary.opening','1000.00')->assertJsonPath('summary.inflow','100.00')->assertJsonPath('summary.outflow','30.00')->assertJsonPath('summary.net','70.00')->assertJsonPath('summary.closing','1070.00')->assertJsonPath('activities.operating','70.00')->assertJsonPath('internal_transfers_excluded',1)->assertJsonPath('review_count',0);
+        $report->assertJsonPath('summary.cash_inflow','100.00')->assertJsonPath('summary.cash_outflow','80.00')->assertJsonPath('summary.bank_inflow','50.00')->assertJsonPath('summary.bank_outflow','0.00');
         $balances=collect($report->json('accounts'))->sum(fn($a)=>(float)$a['balance']);$this->assertSame(1070.0,$balances);
     }
 
@@ -470,6 +471,74 @@ class AccountingLedgerTest extends TestCase
         $this->report('ledger',['account_id'=>$liability])->assertOk()->assertJsonPath('closing','0.00');
     }
 
+    public function test_receipt_and_payment_vouchers_accept_matching_linked_party_accounts():void
+    {
+        $ids=[];
+        foreach(['customer','supplier'] as $kind){
+            $id=DB::table('accounting_parties')->insertGetId(['company_id'=>$this->company,'kind'=>$kind,'name'=>'Voucher '.$kind,'active'=>true,'created_at'=>now(),'updated_at'=>now()]);
+            $ids[$kind]=\App\Modules\Accounting\Services\PartyAccounts::sync($this->company,$id);
+        }
+        foreach(['cash_receipt'=>'1110','bank_receipt'=>'1120'] as $kind=>$code){
+            $j=$this->create($this->body('100.00',['kind'=>$kind,'voucher_person'=>'Customer payment','lines'=>[
+                ['account_id'=>$this->accounts[$code],'debit'=>'100.00','credit'=>'0.00'],
+                ['account_id'=>$ids['customer'],'debit'=>'0.00','credit'=>'100.00']]]));
+            $this->assertDatabaseHas('accounting_journal_lines',['journal_id'=>$j['id'],'account_id'=>$ids['customer'],'credit_minor'=>10000]);
+        }
+        foreach(['cash_payment'=>'1110','bank_payment'=>'1120'] as $kind=>$code){
+            $this->create($this->body('25.00',['kind'=>$kind,'voucher_person'=>'Supplier payment','lines'=>[
+                ['account_id'=>$ids['supplier'],'debit'=>'25.00','credit'=>'0.00'],
+                ['account_id'=>$this->accounts[$code],'debit'=>'0.00','credit'=>'25.00']]]));
+        }
+        $this->postJson('/accounting/api/journals',$this->body('10.00',['kind'=>'cash_receipt','voucher_person'=>'Wrong party','lines'=>[
+            ['account_id'=>$this->accounts['1110'],'debit'=>'10.00','credit'=>'0.00'],
+            ['account_id'=>$ids['supplier'],'debit'=>'0.00','credit'=>'10.00']]]))->assertUnprocessable();
+        $data=$this->getJson('/accounting/api/data?company_id='.$this->company)->assertOk()->json('accounts');
+        $this->assertSame('customer',collect($data)->firstWhere('id',$ids['customer'])['party_kind']);
+        $this->assertSame('supplier',collect($data)->firstWhere('id',$ids['supplier'])['party_kind']);
+    }
+
+    public function test_cash_and_bank_books_and_exports_are_super_admin_only():void
+    {
+        $admin=User::factory()->create(['is_active'=>true,'judibas_administrator'=>true]);
+        $this->actingAs($admin)->withSession(['judibas_admin'=>false]);
+        foreach(['cash-book','bank-book'] as $report){
+            $query=['company_id'=>$this->company,'report'=>$report,'from'=>now()->startOfMonth()->toDateString(),'to'=>now()->toDateString()];
+            $this->getJson('/accounting/api/reports?'.http_build_query($query))->assertForbidden();
+            $this->getJson('/accounting/api/reports?'.http_build_query($query+['export'=>'csv']))->assertForbidden();
+            $this->withSession(['judibas_admin'=>true])->getJson('/accounting/api/reports?'.http_build_query($query))->assertOk();
+            $this->withSession(['judibas_admin'=>false]);
+        }
+    }
+
+    public function test_only_super_admin_can_save_future_dated_vouchers_and_early_posting_is_blocked():void
+    {
+        $future=$this->body('100.00',['posting_date'=>now()->addDays(2)->toDateString()]);
+        $j=$this->create($future,false);
+        $this->assertSame('draft',$j['status']);
+        $this->postJson('/accounting/api/journals/'.$j['id'].'/post',['company_id'=>$this->company,'version'=>$j['version']])->assertUnprocessable();
+        $this->assertDatabaseHas('accounting_journals',['id'=>$j['id'],'status'=>'draft']);
+        $admin=User::factory()->create(['is_active'=>true,'judibas_administrator'=>true]);
+        $this->actingAs($admin)->withSession(['judibas_admin'=>false]);
+        $this->postJson('/accounting/api/journals',array_replace($future,['request_key'=>(string)Str::uuid()]))->assertForbidden();
+        $this->postJson('/accounting/api/journals',array_merge($j,['request_key'=>$future['request_key']]))->assertForbidden();
+        $this->postJson('/accounting/api/journals',array_merge($j,['request_key'=>$future['request_key'],'posting_date'=>now()->toDateString()]))->assertForbidden();
+    }
+
+    public function test_voucher_numbers_include_company_code_preserve_legacy_numbers_and_survive_renames():void
+    {
+        $prefix='LTC'.$this->company;
+        $first=$this->create($this->body('100.00'),false);
+        $this->assertSame('JV-'.$prefix.'-0000001',$first['number']);
+        $legacy=DB::table('accounting_journals')->insertGetId(['company_id'=>$this->company,'request_key'=>(string)Str::uuid(),'number'=>'JV-0000099','remarks'=>'Legacy numbering fixture','posting_date'=>now()->toDateString(),'status'=>'draft','created_at'=>now(),'updated_at'=>now()]);
+        $receipt=$this->create($this->body('100.00',['kind'=>'cash_receipt','voucher_person'=>'Counter customer']),false);
+        $this->assertSame('CRV-'.$prefix.'-0000100',$receipt['number']);
+        $this->assertDatabaseHas('accounting_journals',['id'=>$legacy,'number'=>'JV-0000099']);
+        DB::table('communication_companies')->where('id',$this->company)->update(['name'=>'Renamed voucher company '.$this->company]);
+        $third=$this->create($this->body('10.00'),false);
+        $this->assertSame('JV-'.$prefix.'-0000101',$third['number']);
+        $this->postJson('/accounting/api/journals',array_merge($third,['remarks'=>'Update narration only']))->assertOk()->assertJsonPath('journal.number',$third['number']);
+    }
+
     private function create(array $body, bool $post = true): array
     {
         $j = $this->postJson('/accounting/api/journals', $body)->assertOk()->json('journal');
@@ -525,11 +594,13 @@ class AccountingLedgerTest extends TestCase
             $body=$this->body('75.00');
             $body['lines'][0]['account_id']=$this->accounts[$code];
             $party=$this->postJson('/accounting/api/parties',['company_id'=>$this->company,'kind'=>$code==='1130'?'customer':'supplier','name'=>'JV party '.$code,'active'=>true])->assertOk()->json();
-            $body['lines'][0]['party_id']=DB::table('accounting_parties')->where('company_id',$this->company)->where('name','JV party '.$code)->value('id');
+            $party=DB::table('accounting_parties')->where('company_id',$this->company)->where('name','JV party '.$code)->first();
+            $this->postJson('/accounting/api/journals',$body)->assertUnprocessable();
+            $body['lines'][0]['account_id']=$party->account_id;
             $journal=$this->create($body);
             $this->postJson('/accounting/api/journals',$body)->assertOk()->assertJsonPath('journal.id',$journal['id']);
             $this->assertSame('posted',$journal['status']);
-            $this->assertDatabaseHas('accounting_journal_lines',['journal_id'=>$journal['id'],'account_id'=>$this->accounts[$code],'debit_minor'=>7500]);
+            $this->assertDatabaseHas('accounting_journal_lines',['journal_id'=>$journal['id'],'account_id'=>$party->account_id,'party_id'=>$party->id,'debit_minor'=>7500]);
         }
     }
 

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import {useAccountingAlerts} from './useAccountingAlerts';
+import {useAccountingLiveRefresh} from './workspaceRealtime';
 import {ref,watch,computed} from 'vue';
 import {useAccountingPermissions} from './permissions';
 const can=useAccountingPermissions(),props=defineProps<{company:number;book:any}>(),emit=defineEmits(['navigate','cheques']);
@@ -9,8 +11,8 @@ const cash=computed(()=>data.value.cashflow),showMovements=ref(false);
 const activityNames:Record<string,string>={operating:'Operating activities',investing:'Investing activities',financing:'Financing activities',review:'Needs classification review'};
 const cards=computed(()=>[
  {name:'Cash & bank balance',value:cash.value?.summary.closing,permission:'reports.cashflow',target:'ledger',hint:'At selected end date',icon:'cash'},
- {name:'Accounts receivable',value:data.value.receivables?.summary.outstanding,permission:'reports.receivables',target:'receivables',hint:'Outstanding customer invoices',icon:'in'},
- {name:'Accounts payable',value:data.value.payables?.summary.outstanding,permission:'reports.payables',target:'payables',hint:'Outstanding supplier invoices',icon:'out'},
+ {name:'Accounts receivable',value:data.value.receivables?.summary.outstanding,permission:'reports.receivables',target:'receivables',hint:'Posted receipts / credits: '+amount(data.value.receivables?.summary.ledger_credit),icon:'in'},
+ {name:'Accounts payable',value:data.value.payables?.summary.outstanding,permission:'reports.payables',target:'payables',hint:'Posted payments / debits: '+amount(data.value.payables?.summary.ledger_debit),icon:'out'},
  {name:'Income for period',value:data.value.profit?.summary.income,permission:'reports.profit',target:'profit',hint:'Posted income · accrual basis',icon:'chart'},
  {name:'Expenses for period',value:data.value.profit?.summary.expense,permission:'reports.profit',target:'profit',hint:'Posted expenses · accrual basis',icon:'chart'},
 ].filter(c=>can(c.permission)));
@@ -23,6 +25,8 @@ try{
 watch(()=>[props.company,props.book],()=>void load(),{immediate:true});
 const csv=computed(()=>'/accounting/api/reports?'+new URLSearchParams({company_id:String(props.company),report:'cashflow',from:cash.value?.from||from.value,to:cash.value?.to||to.value,export:'csv'}));
 function currentMonth(){from.value=today.slice(0,7)+'-01';to.value=today;void load();}
+useAccountingLiveRefresh(()=>load(),()=>true);
+useAccountingAlerts(error);
 </script>
 <template><section class="ac-financial-dashboard"><div class="ac-section-heading"><div><p class="eyebrow">FINANCIAL WORKSPACE</p><h2>Financial overview</h2><p class="muted">Cash position, outstanding invoices and cheque activity in one place.</p></div><span class="ac-badge active">{{book?.currency||'Books not configured'}}</span></div>
 <form v-if="book" class="ac-dashboard-period" @submit.prevent="load"><div><strong>Reporting period</strong><small>Cash movements and accrual totals follow these dates.</small></div><label>From<input v-model="from" type="date" required :max="to"></label><label>To<input v-model="to" type="date" required :min="from" :max="today"></label><button class="button primary" :disabled="loading">{{loading?'Updating...':'Update overview'}}</button><button type="button" class="button" :disabled="loading" @click="currentMonth">This month</button></form>
@@ -31,7 +35,8 @@ function currentMonth(){from.value=today.slice(0,7)+'-01';to.value=today;void lo
 <template v-else-if="!error"><div class="ac-dashboard-kpis"><button v-for="card in cards" :key="card.name" @click="emit('navigate',card.target)"><span class="ac-dashboard-kpi-top"><small>{{card.name}}</small><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 5h18v14H3z M3 9h18 M7 14h4 M17 14h1"/></svg></span><strong>{{amount(card.value)}}</strong><small>{{card.hint}}</small></button></div>
 <div v-if="cash" class="ac-dashboard-grid"><article class="ac-dashboard-statement"><header><div><p class="eyebrow">POSTED CASH MOVEMENTS</p><h3>Cash flow statement</h3><small>{{cash.from}} — {{cash.to}} · {{cash.currency}}</small></div><a v-if="can('reports.export')" class="button" :href="csv">Download CSV</a></header>
 <div class="ac-cash-opening"><span>Opening cash & bank balance</span><strong>{{amount(cash.summary.opening)}}</strong></div>
-<div class="ac-cash-totals"><div><small>Cash inflows</small><strong class="ac-cash-in">+{{amount(cash.summary.inflow)}}</strong></div><div><small>Cash outflows</small><strong class="ac-cash-out">-{{amount(cash.summary.outflow)}}</strong></div></div>
+<div class="ac-cash-totals"><div><small>Combined inflows</small><strong class="ac-cash-in">+{{amount(cash.summary.inflow)}}</strong></div><div><small>Combined outflows</small><strong class="ac-cash-out">-{{amount(cash.summary.outflow)}}</strong></div></div>
+<div class="ac-cash-totals"><div><small>Cash inflow</small><strong class="ac-cash-in">+{{amount(cash.summary.cash_inflow)}}</strong></div><div><small>Cash outflow</small><strong class="ac-cash-out">-{{amount(cash.summary.cash_outflow)}}</strong></div><div><small>Bank inflow</small><strong class="ac-cash-in">+{{amount(cash.summary.bank_inflow)}}</strong></div><div><small>Bank outflow</small><strong class="ac-cash-out">-{{amount(cash.summary.bank_outflow)}}</strong></div></div><p class="ac-help">Cash and bank breakdowns include internal transfers. Combined inflows and outflows exclude internal transfers; opening entries are shown separately.</p>
 <dl class="ac-cash-activities"><div v-for="(name,key) in activityNames" :key="key"><dt>{{name}}</dt><dd>{{amount(cash.activities[key])}}</dd></div></dl>
 <div v-if="Number(cash.summary.opening_adjustments)" class="ac-cash-opening"><span>Opening balance entries in period</span><strong>{{amount(cash.summary.opening_adjustments)}}</strong></div><div class="ac-cash-opening"><span>Net cash movement</span><strong>{{amount(cash.summary.net)}}</strong></div><div class="ac-cash-closing"><span>Closing cash & bank balance</span><strong>{{amount(cash.summary.closing)}}</strong></div>
 <p v-if="cash.review_count" class="ac-help" role="status">{{cash.review_count}} cash movement(s) need classification review. Their amounts remain included in the reconciled cash totals; activity classifications are provisional.</p>

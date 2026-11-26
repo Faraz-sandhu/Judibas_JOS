@@ -88,3 +88,29 @@
 .ac-sidebar nav>.ac-nav-disclosure{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;padding:13px 12px;border:0;border-radius:8px;background:transparent;color:var(--muted);font:inherit;font-size:11px;font-weight:600;text-align:left;cursor:pointer}.ac-sidebar nav>.ac-nav-disclosure:hover{background:var(--bg);color:var(--text)}.ac-nav-disclosure svg{width:16px;height:16px;transition:transform .18s}.ac-nav-disclosure svg.open{transform:rotate(180deg)}.ac-nav-children{display:flex;flex-direction:column;gap:5px;padding:0 0 10px 8px;border-left:1px solid var(--line);margin-left:8px}.ac-sidebar .ac-nav-children>button{display:flex;align-items:center;gap:10px;border:0;border-radius:8px;padding:11px 10px;text-align:left;background:transparent;color:var(--muted);font:inherit;font-size:12px;cursor:pointer;width:100%}.ac-sidebar .ac-nav-children>button.active{background:color-mix(in srgb,var(--ac-accent) 13%,transparent);color:var(--ac-accent);box-shadow:inset 3px 0 var(--ac-accent)}.ac-sidebar .ac-nav-children>button:hover{background:var(--bg)}
 
 @media(prefers-reduced-motion:reduce){.ac-nav-disclosure svg{transition:none}}
+
+/* Persistent company context across Accounting sections. */
+.ac-heading .ac-heading-tools{display:flex;align-items:center;gap:12px;min-width:0;max-width:100%}
+.ac-active-company{display:flex;align-items:center;gap:12px;padding:12px 16px;border:1px solid var(--accent,#7864ff);border-radius:12px;background:color-mix(in srgb,var(--accent,#7864ff) 9%,transparent);max-width:440px;min-width:0}
+.ac-active-company-icon{display:flex;align-items:center;justify-content:center;width:36px;height:36px;flex-shrink:0;border-radius:9px;background:color-mix(in srgb,var(--accent,#7864ff) 14%,transparent);color:var(--accent,#7864ff)}
+.ac-active-company-icon svg{width:22px;height:22px}
+.ac-active-company>span:last-child{min-width:0}
+.ac-active-company small{display:block;font-size:11px;line-height:1.4;color:var(--muted);margin-bottom:3px}
+.ac-active-company strong{display:block;font-size:15px;line-height:1.4;overflow-wrap:anywhere}
+@media(max-width:640px){.ac-heading .ac-heading-tools{width:100%}.ac-active-company{flex:1;max-width:none}}
+
+/* Accounting action feedback is presented once, outside scrollable forms. */
+.ac-workspace .admin-error,.ac-dialog .admin-error,.ac-company-dialog .admin-error,.ac-approval-panel .admin-error,.acn-panel .acn-error{display:none!important}
+.ac-feedback-toast{overflow:hidden;align-items:flex-start;padding:16px 16px 18px;min-width:min(340px,calc(100vw - 32px))}
+.ac-feedback-toast strong{display:block;font-size:13px;margin-bottom:4px}.ac-feedback-toast p{margin:0;font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+.ac-feedback-icon{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:#35b77926;color:#55d89b;flex-shrink:0;font-weight:700}.ac-feedback-toast.error .ac-feedback-icon{background:#ef6a6a26;color:#ff9292}
+.ac-feedback-toast>button{background:none;border:0;color:inherit;font-size:21px;line-height:1;margin-left:auto;cursor:pointer;padding:0 0 0 8px}
+.ac-feedback-timer{position:absolute;bottom:0;left:0;height:3px;width:100%;background:#35b779;transform-origin:left;animation:ac-feedback-countdown 5s linear forwards}.ac-feedback-toast.error .ac-feedback-timer{background:#ef6a6a}
+@keyframes ac-feedback-countdown{to{transform:scaleX(0)}}
+@media(prefers-reduced-motion:reduce){.ac-feedback-toast{animation:none}.ac-feedback-timer{animation:none}}
+
+.ac-feedback-icon svg{width:18px;height:18px}
+
+.ac-tree-panel .ac-chart-columns{grid-template-columns:minmax(280px,1fr) 140px 160px 70px;min-width:940px}
+.ac-tree-panel .ac-tree{min-width:max(940px,var(--tree-width,780px))}
+.ac-tree-row>.ac-chart-amount{width:140px;flex:none}.ac-tree-row>.ac-disbursement-amount{width:160px;color:var(--accent,#7864ff)}

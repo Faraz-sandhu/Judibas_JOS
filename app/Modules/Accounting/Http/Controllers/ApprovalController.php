@@ -11,6 +11,7 @@ class ApprovalController
 {
     private function decorate(Request $r, object $approval): array
     {
+        $approval=clone $approval;$approval->stage=Flow::reviewStage($approval);
         $document=Flow::document($approval->company_id,$approval->document_type,$approval->document_id);
         $events=DB::table('accounting_approval_events')->where('approval_id',$approval->id)->orderBy('id')->get();
         $permission=Flow::PERMISSIONS[$approval->stage]??null;
@@ -21,8 +22,14 @@ class ApprovalController
         $sameUploader=$copy&&$r->user()?->id&&$copy->uploaded_by===$r->user()->id;
         $separation=PlatformAccess::administrator($r)||(!($samePreparer&&in_array($approval->stage,['finance_review','ceo_review','manager_review']))&&!($sameCeo&&$approval->stage==='manager_review')&&!($paper&&$sameUploader&&$approval->stage==='manager_review'));
         $canAct=$approval->stage!=='paper_ceo'&&(!$paper||$copy)&&$permission&&Permissions::can($r,$permission)&&$separation&&($approval->stage!=='manager_review'||Permissions::can($r,$document['permission'].'.post'));
-        return (array)$approval+['stage_label'=>$paper&&$approval->stage==='manager_review'?'Finance Head verification':(Flow::STAGES[$approval->stage]??$approval->stage),'document'=>$document['detail'],'events'=>$events,
-            'signed_copies'=>$copies,'can_upload_signed'=>$paper&&in_array($approval->stage,['paper_ceo','manager_review'],true)&&Permissions::can($r,'workflow.upload_signed'),'can_approve'=>(bool)$canAct,'can_return'=>(bool)($permission&&Permissions::can($r,$permission)),
+        if($paper){
+            $canAct=(bool)$copy && match($approval->stage){
+                'head_review'=>Flow::headReviewer($r)&&(PlatformAccess::super($r)||(!$samePreparer&&!$sameUploader)),
+                'officer_confirm'=>Flow::headReviewer($r,'workflow.finance_verify')&&(PlatformAccess::super($r)||(!$samePreparer&&$approval->verified_by!==$r->user()?->id)),
+                'manager_review'=>PlatformAccess::super($r),default=>false};
+        }elseif($approval->stage==='manager_review')$canAct=$canAct&&PlatformAccess::super($r);
+        return (array)$approval+['stage_label'=>Flow::STAGES[$approval->stage]??$approval->stage,'document'=>$document['detail'],'events'=>$events,
+            'signed_copies'=>$copies,'can_upload_signed'=>$paper&&in_array($approval->stage,['paper_ceo','head_review'],true)&&Permissions::can($r,'workflow.upload_signed'),'can_approve'=>(bool)$canAct,'can_return'=>(bool)($canAct||($approval->stage==='paper_ceo'&&$permission&&Permissions::can($r,$permission))),
             'can_withdraw'=>in_array($approval->stage,array_keys(Flow::PERMISSIONS))&&(PlatformAccess::administrator($r)||($samePreparer&&Permissions::can($r,'workflow.submit'))),
             'separation_notice'=>$permission&&!$separation?'The preparer or person who uploaded the signed copy cannot perform final verification. A different Finance Head must review it.':null];
     }
@@ -63,6 +70,7 @@ class ApprovalController
         DB::transaction(function()use($r,$v,$company,$id){
             Ledger::lock($company);$a=DB::table('accounting_approvals')->where('company_id',$company)->where('id',$id)->first();abort_unless($a,404);
             abort_unless($a->version===(int)$v['version'],409,'This approval changed. Refresh before acting.');
+            $a->stage=Flow::reviewStage($a);
             abort_unless(isset(Flow::PERMISSIONS[$a->stage]),409,'This approval is no longer awaiting a decision.');
             $document=Flow::document($company,$a->document_type,$a->document_id);$row=$document['row'];
             abort_unless($row->status==='draft'&&$row->version===$a->document_version,409,'The document changed. Return it for preparation and submit the latest draft.');
@@ -72,16 +80,17 @@ class ApprovalController
                 $next='withdrawn';
             }else{
                 Permissions::require($r,Flow::PERMISSIONS[$a->stage]);
-                if($v['action']==='return')$next='returned';
+                if($v['action']==='return'){abort_unless($this->decorate($r,$a)['can_return'],403);$next='returned';}
                 else{
                     $allowed=$this->decorate($r,$a);abort_unless($allowed['can_approve'],403,'The preparer and CEO cannot perform incompatible approval stages. Use a different authorised reviewer.');
                     if($a->stage==='manager_review'){
+                        abort_unless(PlatformAccess::super($r),403,'Only Super Admin can post approved documents.');
                         abort_unless($v['action']==='post',422,'Use final posting for the Finance Manager stage.');
                         Permissions::require($r,$document['permission'].'.post');
                         if($a->workflow_mode==='paper'){
                             abort_unless($r->boolean('verified_signed_copy'),422,'Confirm that you checked the CEO stamp/signature, voucher details and amounts against the attached copy.');
                             $copy=Flow::signedCopy($a);abort_unless($copy,422,'A current signed copy is required.');
-                            $values+=['verified_copy_id'=>$copy->id,'verified_by'=>$r->user()?->id,'verified_at'=>now()];
+                            if(!$a->verified_at)$values+=['verified_copy_id'=>$copy->id,'verified_by'=>$r->user()?->id,'verified_at'=>now()];
                         }
                         $input=['company_id'=>$company,'version'=>$row->version];
                         if($a->document_type==='payment')$input=json_decode($row->payload,true);
@@ -93,7 +102,12 @@ class ApprovalController
                         $next='posted';
                     }else{
                         abort_unless($v['action']==='approve',422,'This stage requires approval before posting.');
-                        $next=['finance_review'=>'ceo_review','ceo_review'=>'finance_verify','finance_verify'=>'manager_review'][$a->stage];
+                        $next=['finance_review'=>'ceo_review','ceo_review'=>'finance_verify','finance_verify'=>'manager_review','head_review'=>'officer_confirm','officer_confirm'=>'manager_review'][$a->stage];
+                        if($a->stage==='head_review'){
+                            abort_unless($r->boolean('verified_signed_copy'),422,'Confirm the CEO signature and voucher amounts against the signed copy.');
+                            $copy=Flow::signedCopy($a);abort_unless($copy&&\Illuminate\Support\Facades\Storage::disk('local')->exists($copy->path),422,'The current signed voucher file is unavailable.');
+                            $values+=['verified_copy_id'=>$copy->id,'verified_by'=>$r->user()?->id,'verified_at'=>now()];
+                        }
                         if($a->stage==='ceo_review')$values['ceo_by']=$r->user()?->id;
                     }
                 }

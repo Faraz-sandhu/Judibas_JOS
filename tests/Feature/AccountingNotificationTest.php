@@ -43,7 +43,7 @@ class AccountingNotificationTest extends TestCase
         Event::assertDispatched(ActivityChanged::class,function($event){
             $this->assertSame(['company_id'=>$this->company,'notification_id'=>$event->notificationId],$event->broadcastWith());
             $this->assertSame('accounting.activity',$event->broadcastAs());
-            $this->assertSame(['private-accounting.activity.admin','private-accounting.activity.company.'.$this->company],array_map(fn($c)=>$c->name,$event->broadcastOn()));
+            $this->assertSame(['private-accounting.activity.admin','private-accounting.activity.company.'.$this->company,'private-accounting.workspace.admin','private-accounting.workspace.company.'.$this->company],array_map(fn($c)=>$c->name,$event->broadcastOn()));
             return true;
         });
     }
@@ -100,4 +100,21 @@ class AccountingNotificationTest extends TestCase
         $this->getJson('/accounting/api/notifications?company_id='.$this->company)->assertOk()->assertJsonPath('items.0.url',\App\Services\CompanyWorkspace::url('accounting',$this->company).'?entry_id='.$j['id'].'#single-vouchers');
     }
 
+    public function test_workspace_updates_do_not_require_notification_permission_and_reject_other_companies():void
+    {
+        $finance=$this->member();$this->actor($finance);
+        $this->getJson('/accounting/api/notifications')->assertForbidden();
+        $this->getJson('/accounting/api/realtime/config')->assertOk()->assertJsonPath('channels',['accounting.workspace.company.'.$this->company]);
+        $this->postJson('/accounting/api/realtime/auth',['socket_id'=>'1.2','channel_name'=>'private-accounting.workspace.company.'.($this->company+99999)])->assertForbidden();
+        $this->postJson('/accounting/api/realtime/auth',['socket_id'=>'1.2','channel_name'=>'private-accounting.workspace.admin'])->assertForbidden();
+        config(['broadcasting.default'=>'reverb']);
+        Broadcast::shouldReceive('connection')->once()->andReturnSelf();
+        Broadcast::shouldReceive('validAuthenticationResponse')->once()->andReturn(['auth'=>'authorized']);
+        $this->postJson('/accounting/api/realtime/auth',['socket_id'=>'1.2','channel_name'=>'private-accounting.workspace.company.'.$this->company])->assertOk()->assertJsonPath('auth','authorized');
+    }
+    public function test_workspace_realtime_rejects_users_without_accounting_access():void
+    {
+        $this->actor(User::factory()->create(['is_active'=>true]));
+        $this->getJson('/accounting/api/realtime/config')->assertForbidden();
+    }
 }

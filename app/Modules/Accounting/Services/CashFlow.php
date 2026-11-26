@@ -62,9 +62,17 @@ class CashFlow
             $outflow += $out;
             $rows[] = ['id' => $j->id, 'number' => $j->number, 'date' => $j->posting_date, 'description' => $j->remarks, 'category' => $category, 'inflow' => Ledger::money($in), 'outflow' => Ledger::money($out), 'net' => Ledger::money($n)];
         }
+        // Gross cash/bank movements include internal transfers; combined flows above exclude them.
+        $byType = (clone $q)->whereBetween('j.posting_date', [$from,$to])->where('j.kind','<>','opening')
+            ->select('a.account_type')->selectRaw('SUM(l.debit_minor) as inflow, SUM(l.credit_minor) as outflow')->groupBy('a.account_type')->get()->keyBy('account_type');
+        $breakdown = [];
+        foreach (['Cash'=>'cash','Bank'=>'bank'] as $type=>$key) {
+            $breakdown[$key.'_inflow'] = Ledger::money((int)($byType->get($type)->inflow ?? 0));
+            $breakdown[$key.'_outflow'] = Ledger::money((int)($byType->get($type)->outflow ?? 0));
+        }
         $net = $inflow - $outflow;
         $balances = (clone $q)->where('j.posting_date', '<=', $to)->select('a.id', 'a.code', 'a.name', 'a.account_type')->selectRaw('SUM(l.debit_minor-l.credit_minor) as balance')->groupBy('a.id', 'a.code', 'a.name', 'a.account_type')->orderBy('a.code')->get()->map(fn ($a) => ['id' => $a->id, 'code' => $a->code, 'name' => $a->name, 'type' => $a->account_type, 'balance' => Ledger::money((int) $a->balance)]);
 
-        return ['report' => 'cashflow', 'currency' => $currency, 'from' => $from, 'to' => $to, 'summary' => ['opening' => Ledger::money($opening), 'inflow' => Ledger::money($inflow), 'outflow' => Ledger::money($outflow), 'net' => Ledger::money($net), 'opening_adjustments' => Ledger::money($adjustments), 'closing' => Ledger::money($opening + $net + $adjustments)], 'activities' => array_map(fn ($n) => Ledger::money($n), $buckets), 'review_count' => count(array_filter($rows, fn ($r) => $r['category'] === 'review')), 'internal_transfers_excluded' => $transfers, 'accounts' => $balances, 'rows' => $rows];
+        return ['report' => 'cashflow', 'currency' => $currency, 'from' => $from, 'to' => $to, 'summary' => $breakdown + ['opening' => Ledger::money($opening), 'inflow' => Ledger::money($inflow), 'outflow' => Ledger::money($outflow), 'net' => Ledger::money($net), 'opening_adjustments' => Ledger::money($adjustments), 'closing' => Ledger::money($opening + $net + $adjustments)], 'activities' => array_map(fn ($n) => Ledger::money($n), $buckets), 'review_count' => count(array_filter($rows, fn ($r) => $r['category'] === 'review')), 'internal_transfers_excluded' => $transfers, 'accounts' => $balances, 'rows' => $rows];
     }
 }

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import {useAccountingAlerts} from './useAccountingAlerts';
+import {useAccountingLiveRefresh} from './workspaceRealtime';
 import {ref,computed,watch} from 'vue';
 import AccountingSelect from './AccountingSelect.vue';
 import AccountingDocument from './AccountingDocument.vue';
@@ -20,6 +22,8 @@ function create(){formError.value='';editor.value={company_id:props.company,requ
 async function save(){if(busy.value)return;busy.value=true;formError.value='';try{const r=await api('cheques',editor.value);emit('notice',r.message);editor.value=null;await load();}catch(e){formError.value=(e as Error).message;}finally{busy.value=false;}}
 function start(row:any,kind:string){selected.value=row;action.value=kind;date.value=today;note.value='';formError.value='';}
 async function run(){if(busy.value)return;busy.value=true;formError.value='';try{const r=await api('cheques/'+selected.value.id+'/actions',{company_id:props.company,version:selected.value.version,action:action.value,date:date.value,note:note.value});emit('notice',r.message);action.value='';selected.value=null;await load();}catch(e){formError.value=(e as Error).message;}finally{busy.value=false;}}
+useAccountingLiveRefresh(()=>load(),()=>!editor.value&&!selected.value&&!busy.value);
+useAccountingAlerts(error,formError);
 </script>
 <template><section :class="{'ac-document-open':!!editor}"><div class="ac-section-heading"><div><h2>Cheque Register / PDC</h2><p class="muted">Track received and issued cheques. Pending cheques do not change bank balances.</p></div><button v-if="can('cheques.create')" class="button primary" :disabled="!book||loading||data?.historical" @click="create">+ Register cheque</button></div>
 <p v-if="error" class="notice admin-error" role="alert">{{error}}</p><div v-if="data" class="ac-stats ac-overview-stats"><button v-for="key in ['issued','received','bounced','cleared']" :key="key" @click="filter(key)"><small>PDC {{key}}</small><strong>{{data.summary[key].count}}</strong><span>{{book?.currency}} {{money(data.summary[key].amount)}}</span></button></div>

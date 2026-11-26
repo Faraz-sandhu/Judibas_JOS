@@ -49,6 +49,33 @@ class AccountingImprestTest extends TestCase
         $this->fund = DB::table('accounting_imprest_funds')->find($id);
     }
 
+    public function test_coa_shows_actual_balances_only_to_super_admin_and_disbursement_amount_to_company_users():void
+    {
+        $this->fund();
+        $url='/accounting/api/data?company_id='.$this->company;
+        $chart=$this->getJson($url)->assertOk()->json('accounts');
+        $cash=collect($chart)->firstWhere('id',$this->accounts['01-01-01']);
+        $this->assertSame('150000.00',$cash['balance']);
+        $this->assertSame('50000.00',$cash['disbursement_amount']);
+        $this->assertTrue($cash['actual_balance_visible']);
+        $this->officer();
+        $chart=$this->getJson($url)->assertOk()->json('accounts');
+        foreach($chart as $account){
+            $this->assertFalse($account['actual_balance_visible']);$this->assertSame('0.00',$account['debit']);$this->assertSame('0.00',$account['credit']);
+            if($account['id']===$this->accounts['01-01-01']){$this->assertSame('50000.00',$account['balance']);$this->assertSame('disbursement',$account['balance_basis']);}
+            elseif(!$account['display_balance_visible'])$this->assertSame('0.00',$account['balance']);
+        }
+        $this->assertSame('50000.00',collect($chart)->firstWhere('id',$this->accounts['01-01-01'])['disbursement_amount']);
+        $this->actingAs($this->manager)->withSession(['judibas_admin'=>false]);
+        $cash=collect($this->getJson($url)->assertOk()->json('accounts'))->firstWhere('id',$this->accounts['01-01-01']);
+        $this->assertSame('50000.00',$cash['balance']);$this->assertSame('50000.00',$cash['disbursement_amount']);
+        $this->admin();$before=ImprestFunds::balance($this->fund);
+        $this->postJson('/accounting/api/imprest/allocate',$this->body('funding','25000.00'))->assertOk();
+        $cash=collect($this->getJson($url)->assertOk()->json('accounts'))->firstWhere('id',$this->accounts['01-01-01']);
+        $this->assertSame('50000.00',$cash['disbursement_amount']);
+        $this->assertSame($before,ImprestFunds::balance($this->fund));
+    }
+
     private function member(string $role): User
     {
         $user = User::factory()->create(['is_active' => true, 'judibas_administrator' => false]);
@@ -219,7 +246,17 @@ class AccountingImprestTest extends TestCase
         $approval = DB::table('accounting_approvals')->where('document_id', $j['id'])->where('document_type', 'journal')->first();
         $this->postJson('/accounting/api/approvals/'.$approval->id.'/actions', ['company_id' => $this->company, 'version' => $approval->version, 'action' => 'post', 'note' => 'Trying to post my own expense', 'verified_signed_copy' => true])->assertForbidden();
         $this->actingAs($this->manager)->withSession(['judibas_admin' => false]);
-        $this->postJson('/accounting/api/approvals/'.$approval->id.'/actions', ['company_id' => $this->company, 'version' => $approval->version, 'action' => 'post', 'note' => 'Signed copy verified by finance head.', 'verified_signed_copy' => true])->assertOk();
+        $head=DB::table('communication_companies')->where('name','Judibas GOC')->value('id')??DB::table('communication_companies')->insertGetId(['name'=>'Judibas GOC']);
+        UserProductAccess::sync($this->manager,['product_slugs'=>['accounts'],'company_ids'=>[$this->company,$head],'accounting_role'=>'manager']);
+        $this->postJson('/accounting/api/approvals/'.$approval->id.'/actions', ['company_id' => $this->company, 'version' => $approval->version, 'action' => 'approve', 'note' => 'Signed copy verified by head-office finance manager.', 'verified_signed_copy' => true])->assertOk();
+        $approval=DB::table('accounting_approvals')->find($approval->id);
+        $this->postJson('/accounting/api/approvals/'.$approval->id.'/actions',['company_id'=>$this->company,'version'=>$approval->version,'action'=>'approve','note'=>'Manager cannot confirm their own review.'])->assertForbidden();
+        $headOfficer=User::factory()->create(['is_active'=>true]);
+        UserProductAccess::sync($headOfficer,['product_slugs'=>['accounts'],'company_ids'=>[$this->company,$head],'accounting_role'=>'finance_officer']);
+        $this->actingAs($headOfficer);
+        $this->postJson('/accounting/api/approvals/'.$approval->id.'/actions',['company_id'=>$this->company,'version'=>$approval->version,'action'=>'approve','note'=>'Judibas GOC Finance Officer confirmed the reviewed voucher.'])->assertOk();
+        $this->admin();$approval=DB::table('accounting_approvals')->find($approval->id);
+        $this->postJson('/accounting/api/approvals/'.$approval->id.'/actions',['company_id'=>$this->company,'version'=>$approval->version,'action'=>'post','note'=>'Super Admin approves final posting.','verified_signed_copy'=>true])->assertOk();
         $this->assertSame(4900000, ImprestFunds::balance($this->fund));
         $this->assertSame(0, ImprestFunds::reserved($this->fund));
     }

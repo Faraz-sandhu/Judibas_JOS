@@ -24,5 +24,17 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('communication-invite', fn (Request $r) => Limit::perMinute(10)->by('invite:'.($r->user()?->id ?? $r->session()->getId())));
         RateLimiter::for('invitation-accept', fn (Request $r) => Limit::perMinute(6)->by('accept:'.$r->ip().':'.hash('sha256', (string) $r->route('token'))));
         RateLimiter::for('communication-message', fn (Request $r) => Limit::perMinute(60)->by('message:'.($r->user()?->id ?? $r->session()->getId())));
+        RateLimiter::for('application-writes', function (Request $r) {
+            $actor = $r->user()?->id ?? $r->session()->getId();
+            return [
+                Limit::perMinute(120)->by('app-write:'.hash('sha256', $actor.'|'.$r->segment(1))),
+                // Allow for staff sharing one office IP; the actor limit is stricter.
+                Limit::perMinute(3000)->by('app-write-ip:'.$r->ip()),
+            ];
+        });
+        RateLimiter::for('application-exports', function (Request $r) {
+            $actor = $r->user()?->id ?? $r->session()->getId();
+            return Limit::perMinute(20)->by('app-export:'.hash('sha256', $actor.'|'.$r->ip()));
+        });
     }
 }

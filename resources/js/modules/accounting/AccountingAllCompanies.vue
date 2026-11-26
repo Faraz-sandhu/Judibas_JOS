@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import {useAccountingAlerts} from './useAccountingAlerts';
+import {useAccountingLiveRefresh} from './workspaceRealtime';
 import {ref,computed,watch,onBeforeUnmount} from 'vue';
 import AccountingStatement from './AccountingStatement.vue';
 import AccountingCombinedChart from './AccountingCombinedChart.vue';
@@ -19,6 +21,8 @@ function value(row:any,key:string){if(row[key]==null)return '-';return monetary.
 function showReportAccount(statement:any,id:string|number){reportAccount.value=statement.rows.find((row:any)=>row.account_id===id)||null;}
 async function load(){const gen=++generation;loading.value=true;error.value='';try{const q=new URLSearchParams({workspace_group:new URLSearchParams(location.search).get('workspace_group')||'',section:props.section,from:from.value,to:to.value,page:String(page.value),search:search.value,status:status.value,basis:basis.value,trial_columns:trial.value});const r=await fetch('/accounting/api/all-companies?'+q,{headers:{Accept:'application/json'}});const d=await r.json();if(!r.ok)throw Error(Object.values(d.errors||{}).flat().join(' ')||d.message);if(gen===generation)result.value=d;}catch(e){if(gen===generation)error.value=(e as Error).message;}finally{if(gen===generation)loading.value=false;}}
 watch(()=>props.section,()=>{page.value=1;status.value='';result.value=null;reportAccount.value=null;void load();},{immediate:true});onBeforeUnmount(()=>generation++);
+useAccountingLiveRefresh(()=>load(),()=>true);
+useAccountingAlerts(error);
 </script>
 <template><section class="ac-all-companies"><div class="ac-section-heading"><div><p class="eyebrow">ALL COMPANIES / COMBINED VIEW</p><h2>{{titles[section]||section}}</h2><p class="muted">{{groupLabel?'Companies listed under '+groupLabel+'.':'One view across Accounting companies.'}} Exact source entries are available below.</p></div><span v-if="combined" class="ac-badge active">{{result.company_count}} companies</span></div>
 <form class="ac-filters" @submit.prevent="page=1;load()"><label>{{combined?'Filter companies':'Search'}}<input v-model="search" :placeholder="combined?'Company name':'Company or record'" type="search"></label><template v-if="!['books','chart','customers','suppliers','audit','approvals'].includes(section)"><label>From<input v-model="from" type="date" required></label><label>To<input v-model="to" type="date" required :min="from"></label></template><label v-if="['sales','purchases','journals','single-vouchers','cash-receipts','cash-payments'].includes(section)">Status<select v-model="status"><option value="">All statuses</option><option value="draft">Non-posted</option><option value="posted">Posted</option><option value="reversed">Reversed</option></select></label><label v-if="section==='profit'">Accounting basis<select v-model="basis"><option value="accrual">Accrual basis</option><option value="cash">Cash basis</option></select></label><label v-if="section==='trial'">Trial Balance view<select v-model="trial"><option value="2">2 columns</option><option value="6">6 columns</option></select></label><button class="button primary" :disabled="loading">{{loading?'Loading...':'Update view'}}</button></form>

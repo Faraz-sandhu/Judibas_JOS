@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import {useAccountingAlerts} from './useAccountingAlerts';
+import {useAccountingLiveRefresh} from './workspaceRealtime';
 import {ref,computed,watch} from 'vue';
 import AccountingSelect from './AccountingSelect.vue';
 import {useAccountingPermissions} from './permissions';
@@ -23,6 +25,8 @@ function params(){return new URLSearchParams({company_id:String(props.company),r
 async function load(reset=false){if(reset)page.value=1;const token=++generation;busy.value=true;error.value='';try{const filters=!reset&&Object.keys(applied.value).length?new URLSearchParams({...applied.value,page:String(page.value)}):params();const r=await fetch('/accounting/api/reports?'+filters,{headers:{Accept:'application/json'}}),d=await r.json();if(!r.ok)throw Error(Object.values(d.errors||{}).flat().join(' ')||d.message);if(token===generation){result.value=d;const saved:Record<string,string>={};filters.forEach((value,key)=>saved[key]=value);applied.value=saved;}}catch(e:any){if(token===generation){error.value=e.message;result.value=null;}}finally{if(token===generation)busy.value=false;}}
 async function download(){if(exporting.value)return;exporting.value=true;error.value='';try{const q=new URLSearchParams(applied.value);q.set('export','csv');const r=await fetch('/accounting/api/reports?'+q);if(!r.ok)throw Error('Unable to export this report.');const url=URL.createObjectURL(await r.blob()),a=document.createElement('a');a.href=url;a.download=props.section+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(e:any){error.value=e.message;}finally{exporting.value=false;}}
 watch(()=>[props.company,props.section],async()=>{account.value='';party.value='';parties.value=[];applied.value={};const company=props.company,section=props.section;void load(true);if(people.value){try{const r=await fetch('/accounting/api/report-parties?company_id='+company+'&report='+section,{headers:{Accept:'application/json'}});const d=await r.json();if(r.ok&&company===props.company&&section===props.section)parties.value=d.data;}catch{}}},{immediate:true});
+useAccountingLiveRefresh(()=>load(),()=>true);
+useAccountingAlerts(error);
 </script>
 <template><section class="ar-report">
 <header class="ar-heading"><div><span class="ar-eyebrow">Accounting / Reports</span><h2>{{title}}</h2><p class="muted">{{aged?'Outstanding invoice aging by due date.':sales?'Posted sales invoices, after discounts and including tax.':people?'Customer and supplier movements from the posted ledger.':'Posted account movements with period totals.'}}</p></div><button v-if="can('reports.export')" class="button" type="button" :disabled="busy||exporting||!result" @click="download"><span v-if="exporting" class="ac-spinner"></span>{{exporting?'Preparing export...':'Download CSV'}}</button></header>

@@ -23,8 +23,8 @@ type Info={title:string;intro:string;body:string};
 declare global {interface Window {portal:{name:string;tagline:string;logo:string|null;logoIcon?:string|null;products:Product[];product:Product|null;page?:Info|null;pmsBootstrap?:any;workspacePath?:string|null;workspaceGroupName?:string|null;companyWorkspace?:{product:string;id:number|string;slug:string}|null;workspaceCompanies?:{id:number;name:string;slug:string}[];admin:boolean;administrator?:boolean;superAdmin?:boolean;settingsPage:boolean;productsPage:boolean;productsTheme?:string;catalogueGroups?:any[];loginPage:boolean;employee:{name:string;email:string}|null;invitation?:{token:string;email:string;company:string;existing:boolean};posts:{title:string;slug:string;excerpt:string}[];announcement:{title:string;text:string;url:string};error:string|null;success:string|null;validationErrors:string[]}}}
 const portal=reactive(window.portal);
 let toastTimer:number|undefined;
-watch(()=>portal.success,(value)=>{if(value){window.clearTimeout(toastTimer);toastTimer=window.setTimeout(()=>{portal.success=null;},4500);}},{immediate:true});
-watch(()=>portal.error,(value)=>{if(value){window.clearTimeout(toastTimer);toastTimer=window.setTimeout(()=>{portal.error=null;},6000);}},{immediate:true});
+watch(()=>portal.success,(value)=>{if(value){window.clearTimeout(toastTimer);toastTimer=window.setTimeout(()=>{portal.success=null;},accountingWorkspace?5000:4500);}},{immediate:true});
+watch(()=>portal.error,(value)=>{if(value){window.clearTimeout(toastTimer);toastTimer=window.setTimeout(()=>{portal.error=null;},accountingWorkspace?5000:6000);}},{immediate:true});
 const locationPath=window.portal.workspacePath||window.location.pathname;
 const PmsInvitationJoin=defineAsyncComponent(()=>import('./modules/pms/PmsInvitationJoin.vue'));
 const pmsWorkspace=(window.portal.workspacePath||window.location.pathname)==='/pms';

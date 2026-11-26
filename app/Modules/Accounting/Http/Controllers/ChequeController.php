@@ -79,6 +79,7 @@ class ChequeController
 
     public function save(Request $r)
     {
+        abort_unless(\App\Services\PlatformAccess::super($r),403,'Only Super Admin can add post-dated cheques.');
         $v = $r->validate(['company_id' => 'required|integer', 'request_key' => 'required|uuid', 'invoice_id' => 'required|integer', 'bank_account_id' => 'required|integer', 'cheque_number' => 'required|string|max:100', 'drawee_bank' => 'required|string|max:150', 'cheque_date' => 'required|date_format:Y-m-d', 'recorded_date' => 'required|date_format:Y-m-d|before_or_equal:today', 'amount' => 'required', 'notes' => 'nullable|string|max:2000']);
         $company = (int) $v['company_id'];
         Access::company($r, $company, 'cheques.create');

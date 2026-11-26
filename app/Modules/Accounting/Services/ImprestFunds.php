@@ -25,8 +25,11 @@ class ImprestFunds
     {
         $ids = DB::table('accounting_imprest_funds')->whereIn('account_id', collect($accounts)->pluck('id'))->pluck('account_id')->all();
 
-        return collect($accounts)->map(function ($account) use ($ids) {
+        $parties = DB::table('accounting_parties')->whereIn('account_id', collect($accounts)->pluck('id'))->where('active', true)->get()->keyBy('account_id');
+        return collect($accounts)->map(function ($account) use ($ids, $parties) {
             $account->imprest_fund = in_array($account->id, $ids, true);
+            $party = $parties->get($account->id);
+            $account->party_kind = $party && (int)$party->company_id === (int)$account->company_id ? $party->kind : null;
 
             return $account;
         });
