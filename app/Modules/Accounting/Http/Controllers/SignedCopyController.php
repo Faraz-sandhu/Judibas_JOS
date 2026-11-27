@@ -23,27 +23,27 @@ class SignedCopyController
                     $id=Flow::submit($r,$company,'journal',(int)$v['document_id'],(int)$v['version'],'Prepared for CEO paper approval.');
                 }
                 $a=DB::table('accounting_approvals')->where('company_id',$company)->where('id',$id)->first();abort_unless($a,404);
-                abort_unless($a->workflow_mode==='paper'&&$a->document_type==='journal'&&in_array($a->stage,['paper_ceo','head_review','manager_review'],true),409,'This voucher is not awaiting a CEO-signed copy.');
+                abort_unless($a->workflow_mode==='paper'&&$a->document_type==='journal'&&(PlatformAccess::super($r)||in_array($a->stage,['paper_ceo','head_review','manager_review'],true)),409,'This voucher is not awaiting a CEO-signed copy.');
                 abort_unless($initial||$a->version===(int)$v['version'],409,'The approval changed. Refresh before uploading.');
                 $document=Flow::document($company,'journal',$a->document_id);$row=$document['row'];
-                abort_unless($row->status==='draft'&&$row->version===$a->document_version,409,'The voucher changed. Submit the latest saved version.');
-                Ledger::checkDate(Ledger::book($company),$row->posting_date,$row->posting_date>now()->toDateString());
+                abort_unless((PlatformAccess::super($r)||($row->status==='draft'&&$row->version===$a->document_version)),409,'The voucher changed. Submit the latest saved version.');
+                if(!PlatformAccess::super($r))Ledger::checkDate(Ledger::book($company),$row->posting_date,$row->posting_date>now()->toDateString());
                 $mime=$file->getMimeType();abort_unless(in_array($mime,['image/jpeg','image/png','image/webp','application/pdf'],true),422,'Upload a JPG, PNG, WebP image or PDF.');
                 $path=$file->store('accounting-signed-copies/'.$company,'local');abort_unless($path,500,'Unable to save the signed copy.');
                 $name=mb_substr(str_replace(["\r","\n",'\\','/'],'_',basename($file->getClientOriginalName())),0,240);
                 $copy=DB::table('accounting_signed_copies')->insertGetId(['company_id'=>$company,'approval_id'=>$id,'submission_version'=>$a->submission_version,'document_version'=>$row->version,'path'=>$path,'original_name'=>$name,'mime'=>$mime,'size'=>$file->getSize(),'sha256'=>hash_file('sha256',$file->getRealPath()),'uploaded_by'=>$r->user()?->id,'uploaded_name'=>PlatformAccess::super($r)?'Super Admin':$r->user()->name,'created_at'=>now()]);
-                DB::table('accounting_approvals')->where('id',$id)->update(['stage'=>'head_review','verified_copy_id'=>null,'verified_by'=>null,'verified_at'=>null,'version'=>$a->version+1,'updated_at'=>now()]);
-                Flow::event($r,$id,$a->stage!=='paper_ceo'?'signed_copy_replaced':'signed_copy_submitted',$a->stage,'head_review',trim($v['note']));
+                DB::table('accounting_approvals')->where('id',$id)->update(['stage'=>$a->stage==='posted'?'posted':'head_review','verified_copy_id'=>null,'verified_by'=>null,'verified_at'=>null,'version'=>$a->version+1,'updated_at'=>now()]);
+                Flow::event($r,$id,$a->stage!=='paper_ceo'?'signed_copy_replaced':'signed_copy_submitted',$a->stage,$a->stage==='posted'?'posted':'head_review',trim($v['note']));
                 Access::audit($r,$company,'CEO-signed voucher copy attached',$document['detail']['number'],['copy_id'=>$copy,'document_version'=>$row->version,'submission_version'=>$a->submission_version]);
             });
         }catch(\Throwable $e){if($path)Storage::disk('local')->delete($path);throw $e;}
-        return ['message'=>'Signed copy attached. Non-posted voucher sent to Judibas GOC Finance Manager for verification.'];
+        return ['message'=>'Signed copy saved. Previous copies remain in history; non-posted vouchers require fresh verification.'];
     }
 
     public function show(Request $r,int $id)
     {
         $company=(int)$r->validate(['company_id'=>'required|integer'])['company_id'];Access::company($r,$company,'workflow.view');
-        $copy=DB::table('accounting_signed_copies')->where('company_id',$company)->where('id',$id)->first();abort_unless($copy,404);
+        $copy=DB::table('accounting_signed_copies')->where('company_id',$company)->where('id',$id)->when(!PlatformAccess::super($r),fn($q)=>$q->whereNull('removed_at'))->first();abort_unless($copy,404);
         $approval=DB::table('accounting_approvals')->find($copy->approval_id);
         if (\App\Modules\Accounting\Services\ImprestFunds::restricted($r)) {
             abort_unless($approval&&$approval->document_type==='journal',403);

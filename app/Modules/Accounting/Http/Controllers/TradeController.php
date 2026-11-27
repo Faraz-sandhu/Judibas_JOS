@@ -18,7 +18,7 @@ class TradeController
         if(isset($v['kind']))Permissions::require($r,($v['kind']==='customer'?'customers':'suppliers').'.view');
         abort_unless($allowed,403);
 
-        return DB::table('accounting_parties')->whereIn('kind',$allowed)->where('company_id', $v['company_id'])->when($v['id']??null,fn($q,$id)=>$q->where('id',$id))->when($v['kind'] ?? null, fn ($q, $s) => $q->where('kind', $s))->when($v['search'] ?? null, fn ($q, $s) => $q->where('name', 'ilike', '%'.$s.'%'))->orderBy('name')->paginate(20);
+        return DB::table('accounting_parties')->whereIn('kind',$allowed)->where('company_id', $v['company_id'])->whereNotIn('id',\App\Modules\Accounting\Services\AdminRecordHistory::removed('party',(int)$v['company_id']))->when($v['id']??null,fn($q,$id)=>$q->where('id',$id))->when($v['kind'] ?? null, fn ($q, $s) => $q->where('kind', $s))->when($v['search'] ?? null, fn ($q, $s) => $q->where('name', 'ilike', '%'.$s.'%'))->orderBy('name')->paginate(20);
     }
 
     public function saveParty(Request $r)
@@ -31,6 +31,7 @@ class TradeController
             $old = isset($v['id']) ? DB::table('accounting_parties')->where('company_id', $company)->where('id', $v['id'])->first() : null;
             abort_if(isset($v['id']) && ! $old, 404);
             abort_if($old && $old->version !== (int) $v['version'], 409, 'This contact changed. Reopen it before saving.');
+            if($old)\App\Modules\Accounting\Services\AdminRecordHistory::assertLive('party',$company,$old->id);
             abort_if($old && $old->kind !== $v['kind'], 422, 'Customer or supplier type cannot change.');
             $values = collect($v)->except(['id', 'version'])->all();
             $values['name'] = trim($values['name']);
@@ -57,7 +58,7 @@ class TradeController
             Permissions::require($r,($kind==='sale'?'sales':'purchases').'.view');
             return ['invoice' => Trade::invoice($company, $v['id'])];
         }
-        $rows = DB::table('accounting_invoices')->whereIn('kind',$allowed)->where('company_id', $company)->when($v['kind'] ?? null, fn ($q, $s) => $q->where('kind', $s))->when($v['status'] ?? null, fn ($q, $s) => $q->where('status', $s))->when($v['party_id'] ?? null, fn ($q, $s) => $q->where('party_id', $s))->orderByDesc('posting_date')->orderByDesc('id')->paginate(15);
+        $rows = DB::table('accounting_invoices')->whereIn('kind',$allowed)->where('company_id', $company)->whereNotIn('id',\App\Modules\Accounting\Services\AdminRecordHistory::removed('invoice',$company))->when($v['kind'] ?? null, fn ($q, $s) => $q->where('kind', $s))->when($v['status'] ?? null, fn ($q, $s) => $q->where('status', $s))->when($v['party_id'] ?? null, fn ($q, $s) => $q->where('party_id', $s))->orderByDesc('posting_date')->orderByDesc('id')->paginate(15);
         $rows->setCollection($rows->getCollection()->map(fn ($i) => Trade::invoice($company, $i->id)));
 
         return $rows;
@@ -128,6 +129,7 @@ class TradeController
                     $shape=fn($rows)=>array_map(fn($line)=>array_intersect_key($line,array_flip(['description','quantity','rate'])),$rows);
                     abort_unless($shape($lines)===$shape($sourceLines),422,'Linked order lines cannot change; account mappings and invoice tax can be reviewed separately.');
                 }
+                \App\Modules\Accounting\Services\AdminRecordHistory::assertLive('invoice',$company,$old->id);
                 ApprovalFlow::ensureEditable($company,'invoice',$old->id);
                 abort_unless($old->status === 'draft' && $old->version === (int) $v['version'], 409, 'Only the latest draft can be changed. Reopen it.');
                 abort_unless($old->request_key === $v['request_key'] && $old->kind === $v['kind'], 422, 'Invoice identity cannot change.');
@@ -166,6 +168,7 @@ class TradeController
             Permissions::require($r,($i->kind==='sale'?'sales':'purchases').'.post');
             if ($i->status === 'posted') return;
             ApprovalFlow::requirePosting($r,$company,'invoice',$id,$i->version);
+            \App\Modules\Accounting\Services\AdminRecordHistory::assertLive('invoice',$company,$i->id);
             abort_unless($i->status === 'draft' && $i->version === (int) $v['version'], 409, 'Reopen the latest draft before posting.');
             $sale = $i->kind === 'sale';
             abort_unless(DB::table('accounting_parties')->where('id', $i->party_id)->where('active', true)->exists(), 422, 'The customer or supplier is inactive.');
@@ -196,6 +199,7 @@ class TradeController
 
     public function payment(Request $r, int $id)
     {
+        if($r->filled('replacement_payment_id'))return app(AdminExtendedRecordController::class)->replacePayment($r,$id);
         $v = $r->validate(['company_id' => 'required|integer', 'request_key' => 'required|uuid', 'posting_date' => 'required|date_format:Y-m-d', 'amount' => 'required', 'bank_account_id' => 'required|integer', 'reference' => 'required|string|max:150','currency'=>'nullable|string|size:3','exchange_rate'=>'nullable','exchange_account_id'=>'nullable|integer']);
         $company = (int) $v['company_id'];
         Access::company($r, $company, $r->attributes->has('accounting_approval')?'payments.post':'payments.create');

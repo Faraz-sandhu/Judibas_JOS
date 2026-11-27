@@ -12,6 +12,7 @@ use Tests\TestCase;
 class AccountingTradeTest extends TestCase
 {
     use DatabaseTransactions;
+    use \Tests\Concerns\UploadsAccountingProofFixtures;
 
     private int $company;
     private array $accounts;
@@ -32,6 +33,19 @@ class AccountingTradeTest extends TestCase
         }
         $this->customer = DB::table('accounting_parties')->where('company_id', $this->company)->where('kind', 'customer')->value('id');
         $this->supplier = DB::table('accounting_parties')->where('company_id', $this->company)->where('kind', 'supplier')->value('id');
+    }
+
+    public function test_super_admin_can_reopen_posted_invoice_as_a_correction_draft(): void
+    {
+        $invoice=$this->create($this->body('sale'));
+        $r=$this->postJson('/accounting/api/admin-records/invoice/'.$invoice['id'],['company_id'=>$this->company,'version'=>$invoice['version'],'action'=>'edit','reason'=>'Correct the service invoice.','posting_date'=>now()->toDateString()])->assertOk();
+        $new=$r->json('id');
+        $this->assertDatabaseHas('accounting_invoices',['id'=>$invoice['id'],'status'=>'reversed']);
+        $this->assertDatabaseHas('accounting_invoices',['id'=>$new,'status'=>'draft','journal_id'=>null]);
+        $corrected=$this->getJson('/accounting/api/invoices?company_id='.$this->company.'&id='.$new)->assertOk()->json('invoice');
+        $this->assertSame($invoice['total'],$corrected['total']);
+        $this->assertSame($invoice['lines'],$corrected['lines']);
+        $this->postJson('/accounting/api/invoices/'.$new.'/post',['company_id'=>$this->company,'version'=>1])->assertOk();
     }
 
     public function test_contacts_have_unique_managed_accounts_and_invoices_use_their_own_account(): void
@@ -84,6 +98,54 @@ class AccountingTradeTest extends TestCase
     {
         return array_replace(['company_id'=>$this->company,'request_key'=>(string)Str::uuid(),'invoice_id'=>$invoice['id'],'bank_account_id'=>$this->accounts['1120'],'cheque_number'=>'CH-'.Str::random(10),'drawee_bank'=>'MCB','cheque_date'=>now()->toDateString(),'recorded_date'=>now()->toDateString(),'amount'=>'100.00'],$changes);
     }
+    public function test_super_admin_payment_correction_is_atomic_and_does_not_duplicate_retries(): void
+    {
+        $invoice=$this->create($this->body());
+        $this->postJson('/accounting/api/invoices/'.$invoice['id'].'/payments',$this->payment($invoice))->assertOk();
+        $old=DB::table('accounting_payments')->where('invoice_id',$invoice['id'])->where('status','posted')->first();
+        $form=$this->postJson('/accounting/api/admin-records/payment/'.$old->id,['company_id'=>$this->company,'version'=>$old->version,'action'=>'edit','reason'=>'Correct the customer payment.'])->assertOk()->json('context.form');
+        $payload=['company_id'=>$this->company]+$form;$invalid=$payload;$invalid['amount']='999999.00';
+        $this->postJson('/accounting/api/invoices/'.$invoice['id'].'/payments',$invalid)->assertUnprocessable();
+        $this->assertSame('posted',DB::table('accounting_payments')->find($old->id)->status);
+        $payload['amount']='75.00';
+        $this->postJson('/accounting/api/invoices/'.$invoice['id'].'/payments',$payload)->assertOk()->assertJsonPath('invoice.paid','75.00');
+        $this->assertSame('reversed',DB::table('accounting_payments')->find($old->id)->status);
+        $this->postJson('/accounting/api/invoices/'.$invoice['id'].'/payments',$payload)->assertOk()->assertJsonPath('invoice.paid','75.00');
+        $this->assertSame(1,DB::table('accounting_payments')->where('invoice_id',$invoice['id'])->where('status','posted')->count());
+        $payload['amount']='76.00';$this->postJson('/accounting/api/invoices/'.$invoice['id'].'/payments',$payload)->assertConflict();
+    }
+
+    public function test_super_admin_pdc_correction_and_delete_restore_invoice_and_preserve_prior_snapshot(): void
+    {
+        $invoice=$this->create($this->body());$body=$this->cheque($invoice);$originalDate=now()->toDateString();
+        $this->postJson('/accounting/api/cheques',$body)->assertOk();
+        $c=DB::table('accounting_cheques')->where('invoice_id',$invoice['id'])->first();
+        $this->postJson('/accounting/api/cheques/'.$c->id.'/actions',['company_id'=>$this->company,'version'=>$c->version,'action'=>'clear','date'=>now()->toDateString(),'note'=>'Bank confirmed clearance.'])->assertOk();
+        $this->travel(1)->days();$c=DB::table('accounting_cheques')->find($c->id);
+        $edit=array_replace($body,['version'=>$c->version,'amount'=>'75.00','reason'=>'Correct the cheque amount.']);
+        $this->postJson('/accounting/api/admin-cheques/'.$c->id,$edit)->assertOk();
+        $this->assertDatabaseHas('accounting_cheques',['id'=>$c->id,'status'=>'pending','amount_minor'=>7500]);
+        $this->assertSame(0,DB::table('accounting_payments')->where('invoice_id',$invoice['id'])->where('status','posted')->count());
+        $previous=\App\Modules\Accounting\Services\ChequeSnapshot::at($this->company,$originalDate);
+        $this->assertSame('cleared',$previous[$c->id]['status']);$this->assertSame(10000,$previous[$c->id]['amount_minor']);
+        $c=DB::table('accounting_cheques')->find($c->id);
+        $this->postJson('/accounting/api/cheques/'.$c->id.'/actions',['company_id'=>$this->company,'version'=>$c->version,'action'=>'clear','date'=>now()->toDateString(),'note'=>'Corrected cheque cleared.'])->assertOk();
+        $c=DB::table('accounting_cheques')->find($c->id);
+        $this->postJson('/accounting/api/admin-records/cheque/'.$c->id,['company_id'=>$this->company,'version'=>$c->version,'action'=>'delete','reason'=>'Remove the corrected cheque.','posting_date'=>now()->toDateString()])->assertOk();
+        $this->getJson('/accounting/api/cheques?company_id='.$this->company)->assertOk()->assertJsonPath('rows.total',0);
+        $this->getJson('/accounting/api/invoices?company_id='.$this->company.'&id='.$invoice['id'])->assertOk()->assertJsonPath('invoice.outstanding',$invoice['total']);
+    }
+
+    public function test_pdc_invalid_correction_rolls_back_payment_reversal(): void
+    {
+        $invoice=$this->create($this->body());$body=$this->cheque($invoice);
+        $this->postJson('/accounting/api/cheques',$body)->assertOk();$c=DB::table('accounting_cheques')->where('invoice_id',$invoice['id'])->first();
+        $this->postJson('/accounting/api/cheques/'.$c->id.'/actions',['company_id'=>$this->company,'version'=>$c->version,'action'=>'clear','date'=>now()->toDateString(),'note'=>'Bank confirmed clearance.'])->assertOk();$c=DB::table('accounting_cheques')->find($c->id);
+        $this->postJson('/accounting/api/admin-cheques/'.$c->id,array_replace($body,['version'=>$c->version,'amount'=>'999999.00','reason'=>'Invalid amount correction.']))->assertUnprocessable();
+        $this->assertSame(1,DB::table('accounting_payments')->where('invoice_id',$invoice['id'])->where('status','posted')->count());
+        $this->assertSame('cleared',DB::table('accounting_cheques')->find($c->id)->status);
+    }
+
     public function test_pdc_registration_clearance_and_bounce_restore_outstanding():void
     {
         $invoice=$this->create($this->body());$body=$this->cheque($invoice);

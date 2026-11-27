@@ -21,6 +21,7 @@ class ApprovalFlow
     public static function requirePosting(Request $r,int $company,string $type,int $id,int $version): void
     {
         if($type==='journal')abort_unless(PlatformAccess::super($r),403,'Only Super Admin can post non-posted vouchers.');
+        if($type==='journal'){AdminRecordHistory::assertLive('journal',$company,$id);$journal=DB::table('accounting_journals')->where('company_id',$company)->where('id',$id)->first();abort_unless($journal,404);PaymentProofs::requireCurrent($journal);}
         $approval=self::approval($company,$type,$id);
         if(!self::enabled($company,$type,$id)&&(!$approval||in_array($approval->stage,['returned','withdrawn'])))return;
         $context=$r->attributes->get('accounting_approval');
@@ -87,7 +88,7 @@ class ApprovalFlow
 
     public static function signedCopy(object $approval): ?object
     {
-        return DB::table('accounting_signed_copies')->where('company_id',$approval->company_id)->where('approval_id',$approval->id)->where('document_version',$approval->document_version)->where('submission_version',$approval->submission_version)->orderByDesc('id')->first();
+        return DB::table('accounting_signed_copies')->whereNull('removed_at')->where('company_id',$approval->company_id)->where('approval_id',$approval->id)->where('document_version',$approval->document_version)->where('submission_version',$approval->submission_version)->orderByDesc('id')->first();
     }
 
     public static function queuePayment(Request $r,int $company,int $invoice,array $payload): void

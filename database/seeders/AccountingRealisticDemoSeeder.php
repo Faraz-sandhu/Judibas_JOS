@@ -90,6 +90,7 @@ class AccountingRealisticDemoSeeder extends AccountingDemoSeeder
                         ['account_id' => $byName[$credit], 'debit' => '0.00', 'credit' => $amount],
                     ],
                 ]))['journal'];
+                $this->attachDemoPaymentProof($this->request(['company_id'=>$company]),$journal);
                 $journals->post($this->request(['company_id' => $company, 'version' => $journal['version']]), $journal['id']);
             }
             $reports = app(FinancialReportsController::class);

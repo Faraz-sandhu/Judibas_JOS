@@ -14,6 +14,7 @@ use Tests\TestCase;
 class AccountingLedgerTest extends TestCase
 {
     use DatabaseTransactions;
+    use \Tests\Concerns\UploadsAccountingProofFixtures;
 
     private int $company;
     private array $accounts;
@@ -27,6 +28,74 @@ class AccountingLedgerTest extends TestCase
         $this->accounts = DB::table('accounting_accounts')->where('company_id', $this->company)->pluck('id', 'code')->all();
         foreach (['1000' => '01', '1100' => '01-01', '1110' => '01-01-01', '1120' => '01-01-02', '1130' => '01-01-03', '2000' => '02', '2100' => '02-01', '2110' => '02-01-01', '3000' => '03', '3100' => '03-01', '4000' => '04', '4100' => '04-01', '5000' => '05', '5100' => '05-01', '5110' => '05-01-01'] as $legacy => $code) { $this->accounts[$legacy] = $this->accounts[$code]; }
         $this->postJson('/accounting/api/books', ['company_id' => $this->company, 'version' => 0, 'currency' => 'PKR', 'approval_required' => false, 'start_date' => now()->subYear()->toDateString()])->assertOk();
+    }
+
+    public function test_super_admin_can_edit_root_and_used_accounts_and_archive_restore_hierarchy(): void
+    {
+        $j=$this->create($this->body('125.00'));
+        $root=DB::table('accounting_accounts')->find($this->accounts['1000']);
+        $this->postJson('/accounting/api/admin-accounts/'.$root->id,['company_id'=>$this->company,'version'=>$root->version,'name'=>'Company Assets','code'=>$root->code,'parent_id'=>null,'description'=>'Reviewed root label','active'=>true,'reason'=>'Update the root account name.'])->assertOk();
+        $cash=DB::table('accounting_accounts')->find($this->accounts['1110']);
+        $this->postJson('/accounting/api/admin-accounts/'.$cash->id,['company_id'=>$this->company,'version'=>$cash->version,'name'=>'Office Cash','code'=>$cash->code,'parent_id'=>$cash->parent_id,'active'=>true,'reason'=>'Update the cash account name.'])->assertOk();
+        $this->assertDatabaseHas('accounting_journal_lines',['journal_id'=>$j['id'],'account_id'=>$cash->id,'debit_minor'=>12500]);
+        $root=DB::table('accounting_accounts')->find($root->id);
+        $body=['company_id'=>$this->company,'version'=>$root->version,'action'=>'delete','reason'=>'Archive this account hierarchy.'];
+        $this->postJson('/accounting/api/admin-records/account/'.$root->id,$body)->assertOk();
+        $this->assertFalse(DB::table('accounting_accounts')->find($cash->id)->active);
+        $chart=collect($this->getJson('/accounting/api/data?company_id='.$this->company)->assertOk()->json('accounts'))->keyBy('id');
+        $this->assertTrue($chart[$cash->id]['archived']);$this->assertSame('125.00',$chart[$cash->id]['balance']);
+        $body['version']=DB::table('accounting_accounts')->find($root->id)->version;$body['action']='restore';
+        $this->postJson('/accounting/api/admin-records/account/'.$root->id,$body)->assertOk();
+        $this->assertTrue(DB::table('accounting_accounts')->find($cash->id)->active);
+        $chart=collect($this->getJson('/accounting/api/data?company_id='.$this->company)->assertOk()->json('accounts'))->keyBy('id');
+        $this->assertFalse($chart[$cash->id]['archived']);$this->assertSame('125.00',$chart[$cash->id]['balance']);
+    }
+
+    public function test_super_admin_account_editor_rejects_cycles_stale_versions_and_non_super_users(): void
+    {
+        $a=DB::table('accounting_accounts')->find($this->accounts['1100']);
+        $body=['company_id'=>$this->company,'version'=>$a->version,'name'=>$a->name,'code'=>$a->code,'parent_id'=>$a->id,'active'=>true,'reason'=>'Try account structure validation.'];
+        $this->postJson('/accounting/api/admin-accounts/'.$a->id,$body)->assertUnprocessable();
+        $body['parent_id']=$a->parent_id;$body['version']=99;
+        $this->postJson('/accounting/api/admin-accounts/'.$a->id,$body)->assertConflict();
+        $this->withSession(['judibas_admin'=>false]);$body['version']=$a->version;
+        $this->postJson('/accounting/api/admin-accounts/'.$a->id,$body)->assertForbidden();
+        $this->postJson('/accounting/api/admin-records/account/'.$a->id,['company_id'=>$this->company,'version'=>$a->version,'reason'=>'Not a Super Admin request.','action'=>'delete'])->assertForbidden();
+    }
+
+    public function test_super_admin_can_correct_posted_journal_without_destroying_ledger_history(): void
+    {
+        $original=$this->create($this->body('250.00'));
+        $r=$this->postJson('/accounting/api/admin-records/journal/'.$original['id'],['company_id'=>$this->company,'version'=>$original['version'],'action'=>'edit','reason'=>'Correct the original amount.','posting_date'=>now()->toDateString()])->assertOk();
+        $new=$r->json('id');$this->assertNotEquals($original['id'],$new);
+        $this->assertDatabaseHas('accounting_journals',['id'=>$original['id'],'status'=>'reversed']);
+        $this->assertDatabaseHas('accounting_journals',['id'=>$new,'status'=>'draft']);
+        $this->assertDatabaseHas('accounting_admin_record_history',['record_type'=>'journal','record_id'=>$original['id'],'action'=>'edit']);
+        $this->assertSame(0,(int)DB::table('accounting_journal_lines as l')->join('accounting_journals as j','j.id','=','l.journal_id')->where('j.company_id',$this->company)->whereIn('j.status',['posted','reversed'])->where('l.account_id',$this->accounts['1110'])->selectRaw('SUM(l.debit_minor-l.credit_minor) as balance')->value('balance'));
+        $this->assertSame(2,DB::table('accounting_journal_lines')->where('journal_id',$new)->count());
+    }
+
+    public function test_super_admin_delete_archives_draft_and_blocks_posting_and_repeat_deletion(): void
+    {
+        $j=$this->create($this->body('50.00'),false);
+        $body=['company_id'=>$this->company,'version'=>$j['version'],'action'=>'delete','reason'=>'Remove accidental draft.'];
+        $this->postJson('/accounting/api/admin-records/journal/'.$j['id'],$body)->assertOk();
+        $this->assertDatabaseHas('accounting_journals',['id'=>$j['id'],'status'=>'draft']);
+        $this->getJson('/accounting/api/journals?company_id='.$this->company)->assertOk()->assertJsonPath('total',0);
+        $this->postJson('/accounting/api/journals/'.$j['id'].'/post',['company_id'=>$this->company,'version'=>$j['version']])->assertConflict();
+        $this->postJson('/accounting/api/admin-records/journal/'.$j['id'],$body)->assertConflict();
+    }
+
+    public function test_super_admin_record_management_checks_version_company_and_non_super_access(): void
+    {
+        $j=$this->create($this->body('50.00'),false);
+        $body=['company_id'=>$this->company,'version'=>99,'action'=>'delete','reason'=>'Remove accidental draft.'];
+        $this->postJson('/accounting/api/admin-records/journal/'.$j['id'],$body)->assertConflict();
+        $body['company_id']=999999999;$body['version']=$j['version'];
+        $this->postJson('/accounting/api/admin-records/journal/'.$j['id'],$body)->assertForbidden();
+        $this->withSession(['judibas_admin'=>false]);
+        $body['company_id']=$this->company;
+        $this->postJson('/accounting/api/admin-records/journal/'.$j['id'],$body)->assertForbidden();
     }
 
     public function test_specialized_reports_filter_posted_accounts_and_preserve_existing_reports(): void

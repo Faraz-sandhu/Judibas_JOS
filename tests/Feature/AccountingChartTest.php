@@ -13,6 +13,7 @@ use Tests\TestCase;
 class AccountingChartTest extends TestCase
 {
     use DatabaseTransactions;
+    use \Tests\Concerns\UploadsAccountingProofFixtures;
 
     private int $company;
 

@@ -23,7 +23,7 @@ class ChequeController
         $v = $r->validate(['company_id' => 'required|integer', 'direction' => 'nullable|in:received,issued', 'status' => 'nullable|in:pending,deposited,clearing,cleared,bounced,cancelled,outstanding', 'search' => 'nullable|string|max:100', 'page' => 'nullable|integer|min:1', 'from' => 'nullable|required_with:to|date_format:Y-m-d', 'to' => 'nullable|required_with:from|date_format:Y-m-d|after_or_equal:from']);
         $company = (int) $v['company_id'];
         Access::company($r, $company, 'cheques.view');
-        $q = DB::table('accounting_cheques as c')->join('accounting_parties as p', 'p.id', '=', 'c.party_id')->join('accounting_invoices as i', 'i.id', '=', 'c.invoice_id')->where('c.company_id', $company);
+        $q = DB::table('accounting_cheques as c')->join('accounting_parties as p', 'p.id', '=', 'c.party_id')->join('accounting_invoices as i', 'i.id', '=', 'c.invoice_id')->where('c.company_id', $company)->whereNotIn('c.id',\App\Modules\Accounting\Services\AdminRecordHistory::removed('cheque',$company,$v['to']??null));
         $snapshot = isset($v['to']) ? ChequeSnapshot::at($company, $v['to']) : null;
         $summary = [];
         foreach (['issued', 'received', 'bounced', 'cleared'] as $key) {
@@ -65,7 +65,7 @@ class ChequeController
         $rows = $q->select('c.*', 'p.name as party_name', 'i.number as invoice_number')->orderByDesc('c.id')->paginate(15);
         $rows->getCollection()->transform(function ($c) use ($snapshot) {
             if ($snapshot !== null) {
-                $c->status = $snapshot[$c->id]['status'];
+                $c->status = $snapshot[$c->id]['status'];$c->amount_minor=$snapshot[$c->id]['amount_minor'];$c->direction=$snapshot[$c->id]['direction'];foreach($snapshot[$c->id]['record']??[] as $key=>$value)$c->$key=$value;$historicalInvoice=DB::table('accounting_invoices')->where('id',$c->invoice_id)->where('company_id',$c->company_id)->first(['number','party_name']);if($historicalInvoice){$c->invoice_number=$historicalInvoice->number;$c->party_name=$historicalInvoice->party_name;}
             }
             $c->amount = Ledger::money($c->amount_minor);
             $c->events = DB::table('accounting_cheque_events')->where('cheque_id', $c->id)->when($v['to'] ?? null, fn ($q, $to) => $q->where('event_date', '<=', $to))->orderBy('id')->get();

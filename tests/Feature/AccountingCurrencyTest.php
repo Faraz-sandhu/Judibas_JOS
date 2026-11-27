@@ -10,6 +10,7 @@ use Tests\TestCase;
 class AccountingCurrencyTest extends TestCase
 {
     use DatabaseTransactions;
+    use \Tests\Concerns\UploadsAccountingProofFixtures;
 
     private int $company;
 

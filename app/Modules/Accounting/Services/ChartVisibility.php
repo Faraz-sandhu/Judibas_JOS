@@ -12,6 +12,7 @@ class ChartVisibility
     public static function present(Request $request, int $company, Collection $accounts): Collection
     {
         $actual=PlatformAccess::super($request);
+        $archived=AdminRecordHistory::removed('account',$company)->pluck('record_id')->all();
         $funds=DB::table('accounting_imprest_funds')->where('company_id',$company)
             ->when(ImprestFunds::restricted($request),fn($q)=>$q->where('user_id',$request->user()?->id))->get();
         // Allocated face amounts, not arbitrary account balances or pending drafts.
@@ -60,7 +61,8 @@ class ChartVisibility
             }
         }
         $restricted=ImprestFunds::restricted($request);
-        return $accounts->map(function($account)use($actual,$displayAmounts,$cashBank,$restricted){
+        return $accounts->map(function($account)use($actual,$displayAmounts,$cashBank,$restricted,$archived){
+            $account->archived=in_array($account->id,$archived,true);
             $allocation=$displayAmounts[$account->id]??0;
             $eligible=$cashBank[$account->id]??false;
             $assigned=!$actual&&$eligible&&($allocation>0||$restricted);

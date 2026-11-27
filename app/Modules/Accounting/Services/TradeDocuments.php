@@ -22,7 +22,7 @@ class TradeDocuments
         $i = DB::table('accounting_invoices')->where('company_id', $company)->where('id', $id)->first();
         abort_unless($i, 404);
         $paid = (int) DB::table('accounting_payments')->where('invoice_id', $id)->where('status', 'posted')->sum('amount_minor');
-        $payments = DB::table('accounting_payments')->where('invoice_id', $id)->orderByDesc('id')->get()->map(fn ($p) => array_merge((array) $p, ['amount' => Ledger::money($p->amount_minor)]));
+        $payments = DB::table('accounting_payments')->where('invoice_id', $id)->whereNotIn('id',AdminRecordHistory::removed('payment',$company))->orderByDesc('id')->get()->map(fn ($p) => array_merge((array) $p, ['amount' => Ledger::money($p->amount_minor)]));
 
         $foreignPaid=(int)DB::table('accounting_payments')->where('invoice_id',$id)->where('status','posted')->selectRaw('COALESCE(SUM(COALESCE(foreign_amount_minor,amount_minor)),0) as total')->value('total');
         $foreignTotal=$i->foreign_total_minor??$i->total_minor;

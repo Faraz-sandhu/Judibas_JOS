@@ -12,6 +12,7 @@ use Tests\TestCase;
 class AccountingApprovalTest extends TestCase
 {
     use DatabaseTransactions;
+    use \Tests\Concerns\UploadsAccountingProofFixtures;
     private int $company;
     private array $accounts;
 
@@ -285,6 +286,22 @@ class AccountingApprovalTest extends TestCase
         $this->getJson('/accounting/api/journals?company_id='.$this->company.'&id='.$j['id'])->assertForbidden();
         $this->get('/accounting/vouchers/'.$j['id'].'/print?company_id='.$this->company)->assertForbidden();
         $this->postJson('/accounting/api/journals/'.$j['id'].'/post',['company_id'=>$this->company,'version'=>1])->assertForbidden();
+    }
+
+    public function test_super_admin_can_remove_signed_proof_with_history_and_employee_cannot(): void
+    {
+        $maker=$this->member('finance_officer');$this->asUser($maker);$j=$this->draft();$a=$this->submit($j);$this->attach($a)->assertOk();
+        $copy=DB::table('accounting_signed_copies')->where('approval_id',$a->id)->first();
+        $body=['company_id'=>$this->company,'version'=>1,'action'=>'delete','reason'=>'Wrong signed attachment uploaded.'];
+        $this->postJson('/accounting/api/admin-records/signed-copy/'.$copy->id,$body)->assertForbidden();
+        $this->withSession(['judibas_admin'=>true]);
+        $this->postJson('/accounting/api/admin-records/signed-copy/'.$copy->id,$body)->assertOk();
+        $this->assertNotNull(DB::table('accounting_signed_copies')->where('id',$copy->id)->value('removed_at'));
+        $this->assertSame('paper_ceo',$this->latest($a)->stage);
+        \Illuminate\Support\Facades\Storage::disk('local')->assertExists($copy->path);
+        $this->assertDatabaseHas('accounting_admin_record_history',['record_type'=>'signed-copy','record_id'=>$copy->id,'action'=>'delete']);
+        $this->asUser($maker);
+        $this->get('/accounting/api/signed-copies/'.$copy->id.'?company_id='.$this->company)->assertNotFound();
     }
 
     public function test_signed_copy_upload_from_draft_and_private_company_scoped_preview(): void

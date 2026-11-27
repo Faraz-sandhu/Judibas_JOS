@@ -35,6 +35,7 @@ class JournalController
             $q=DB::table('accounting_journals')->where('company_id',$company)->whereIn('kind',$allowed)->when($v['kind']??null,fn($q,$k)=>$q->where('kind',$k))->when($v['status']??null,fn($q,$s)=>$q->where('status',$s))->when($v['search']??null,fn($q,$s)=>$q->where(fn($q)=>$q->where('number','ilike','%'.$s.'%')->orWhere('reference','ilike','%'.$s.'%')->orWhere('voucher_person','ilike','%'.$s.'%')));
         }
         if (\App\Modules\Accounting\Services\ImprestFunds::restricted($r)) $q->whereIn('id',DB::table('accounting_imprest_movements as m')->join('accounting_imprest_funds as f','f.id','=','m.fund_id')->where('f.company_id',$company)->where('f.user_id',$r->user()->id)->select('m.journal_id'));
+        $q->whereNotIn('id',\App\Modules\Accounting\Services\AdminRecordHistory::removed('journal',$company));
         $rows = $q->orderByDesc('posting_date')->orderByDesc('id')->paginate(15);
         $rows->setCollection($rows->getCollection()->map(fn ($j) => Ledger::document($company, $j->id)));
 
@@ -55,9 +56,11 @@ class JournalController
             $q = DB::table('accounting_journals')->where('company_id', $company);
             $old = ! empty($v['id']) ? (clone $q)->where('id', $v['id'])->first() : null;
             abort_if(! empty($v['id']) && ! $old, 404);
+            abort_if($old && \App\Modules\Accounting\Services\CashCustody::transfer($old->id), 422, 'Cash custody vouchers cannot be changed through another voucher form. Reverse or archive the voucher and create a replacement.');
             abort_if($old&&$old->posting_date>now()->toDateString()&&!\App\Services\PlatformAccess::super($r),403,'Only Super Admin can change a post-dated voucher, including its date.');
             abort_if($old && \App\Modules\Accounting\Services\ImprestFunds::movement($old->id),422,'Imprest vouchers cannot be edited here. Cancel the non-posted voucher in Imprest / Petty Cash and create a replacement.');
             abort_if(DB::table('accounting_imprest_funds')->whereIn('account_id',array_column($v['lines'],'account_id'))->exists(),422,'Officer fund accounts can only be used through Imprest / Petty Cash.');
+            if($old)\App\Modules\Accounting\Services\AdminRecordHistory::assertLive('journal',$company,$old->id);
             if ($old) ApprovalFlow::ensureEditable($company, 'journal', $old->id);
             foreach($v['lines'] as &$inputLine){
                 $account=DB::table('accounting_accounts')->where('company_id',$company)->where('id',$inputLine['account_id'])->first();

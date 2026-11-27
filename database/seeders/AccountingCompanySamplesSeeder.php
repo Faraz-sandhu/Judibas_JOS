@@ -56,7 +56,8 @@ class AccountingCompanySamplesSeeder extends AccountingDemoSeeder
                     ]]))['journal'];
                     $created++;
                     if (! ApprovalPolicy::required($id, 'general')) {
-                        $journals->post($this->request(['company_id' => $id, 'version' => $journal['version']]), $journal['id']);
+                        $this->attachDemoPaymentProof($this->request(['company_id'=>$id]),$journal);
+                $journals->post($this->request(['company_id' => $id, 'version' => $journal['version']]), $journal['id']);
                         $posted++;
                     }
                 }

@@ -142,6 +142,7 @@ class Ledger
         $lines = DB::table('accounting_journal_lines as l')->join('accounting_accounts as a', 'a.id', '=', 'l.account_id')->where('l.journal_id', $id)->orderBy('l.position')->get(['l.*', 'a.code as account_code', 'a.name as account_name']);
         $row->lines = $lines->map(fn ($l) => array_merge((array) $l, ['debit' => self::money($l->foreign_debit_minor??$l->debit_minor), 'credit' => self::money($l->foreign_credit_minor??$l->credit_minor),'base_debit'=>self::money($l->debit_minor),'base_credit'=>self::money($l->credit_minor)]));
         $row->imprest = ImprestFunds::movement($id);
+        $row->custody = CashCustody::transfer($id);
         $row->currency=$row->currency??self::book($company)->currency;
         $row->approval = ApprovalFlow::approval($company,'journal',$id);
         $row->total = self::money((int) $lines->sum('debit_minor'));
@@ -152,7 +153,10 @@ class Ledger
 
     public static function post(Request $r, int $company, object $journal): void
     {
+        AdminRecordHistory::assertLive('journal',$company,$journal->id);
         abort_unless($journal->status === 'draft', 409, 'Only a draft can be posted.');
+        CashCustody::guardPost($journal);
+        PaymentProofs::requireCurrent($journal);
         ImprestFunds::guardPost($company, $journal);
         self::checkDate(self::book($company), $journal->posting_date);
         $lines = DB::table('accounting_journal_lines')->where('journal_id', $journal->id)->get()->map(fn ($l) => ['account_id' => $l->account_id, 'debit' => self::money($l->debit_minor), 'credit' => self::money($l->credit_minor), 'description' => $l->description, 'party_id'=>$l->party_id])->all();
@@ -179,6 +183,7 @@ class Ledger
             self::checkDate(self::book($company), $v['posting_date']);
             abort_if($v['posting_date'] < $original->posting_date, 422, 'A reversal cannot be dated before the original entry.');
             ImprestFunds::guardReverse($company, $id, $v['posting_date']);
+            if ($custody = CashCustody::transfer($id)) abort_if(CashCustody::balance($custody->destination_account_id, $v['posting_date']) < $custody->amount_minor, 422, 'The receiving cash account has insufficient funds to reverse this custody transfer.');
             $rid = DB::table('accounting_journals')->insertGetId(['company_id' => $company, 'request_key' => (string) \Illuminate\Support\Str::uuid(), 'number' => VoucherNumber::next($company,'JV'), 'posting_date' => $v['posting_date'], 'currency'=>$original->currency,'exchange_rate'=>$original->exchange_rate,'kind' => 'reversal', 'remarks' => 'Reversal of '.$original->number.': '.trim($v['reason']), 'reversal_of' => $id, 'reversal_reason' => trim($v['reason']), 'created_by' => $r->user()?->id, 'created_at' => now(), 'updated_at' => now()]);
             $lines = DB::table('accounting_journal_lines')->where('journal_id', $id)->get();
             foreach ($lines as $l) {

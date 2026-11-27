@@ -14,6 +14,7 @@ use Tests\TestCase;
 class AccountingNotificationTest extends TestCase
 {
     use DatabaseTransactions;
+    use \Tests\Concerns\UploadsAccountingProofFixtures;
     private int $company;
     protected function setUp():void
     {

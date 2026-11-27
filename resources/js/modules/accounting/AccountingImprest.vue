@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AccountingPaymentProofs from './AccountingPaymentProofs.vue';
+import AccountingAdminRecordActions from './AccountingAdminRecordActions.vue';
 import {useAccountingAlerts} from './useAccountingAlerts';
 import {useAccountingSuperAdmin} from './permissions';
 const voucherSuperAdmin=useAccountingSuperAdmin();
@@ -41,6 +43,8 @@ async function action(){if(busy.value)return;busy.value=true;formError.value='';
 async function refreshed(){if(journal.value)await view(journal.value.id);await load();emit('changed');}
 useAccountingLiveRefresh(()=>load(),()=>!modal.value&&!journal.value&&!busy.value);
 useAccountingAlerts(error,formError);
+async function adminRecordChanged(d:any){journal.value=null;await load();emit('changed');if(d.context){modal.value=d.context.type==='funding'?'funding':'spending';form.value=d.context.form;}}
+const paymentProofReady=ref(false);
 </script>
 
 <template>
@@ -73,9 +77,10 @@ useAccountingAlerts(error,formError);
  <AccountingDocument v-if="journal" :title="journal.number" :busy="busy" @close="journal=null">
   <p v-if="formError" class="notice admin-error" role="alert">{{formError}}</p><p class="ac-help"><strong>{{journal.imprest?.type==='funding'?'Imprest Advance Voucher':'Petty Cash Payment Voucher'}}</strong> · {{journal.imprest?.void?'Cancelled':journal.status==='draft'?'Non-posted - no ledger effect':journal.status}}<br>{{journal.posting_date}} · {{journal.voucher_person}}</p><p>{{journal.remarks}}</p>
   <div class="ac-table-wrap"><table class="ac-finance-table"><thead><tr><th>Ledger account</th><th class="numeric">Debit</th><th class="numeric">Credit</th></tr></thead><tbody><tr v-for="line in journal.lines" :key="line.id"><td>{{line.account_code}} - {{line.account_name}}</td><td class="numeric">{{money(line.debit)}}</td><td class="numeric">{{money(line.credit)}}</td></tr></tbody><tfoot><tr><th>Total ({{book?.currency}})</th><th class="numeric">{{money(journal.total)}}</th><th class="numeric">{{money(journal.total)}}</th></tr></tfoot></table></div>
-  <div class="ac-form-actions"><a v-if="!journal.imprest?.void&&can((journal.kind==='general'?'journals':'cash_payments')+'.print')" class="button" :href="printable" target="_blank" rel="noopener">Print voucher</a><button v-if="canPost" class="button primary" @click="confirmAction='post'">Review posting</button><button v-if="journal.status==='draft'&&!journal.imprest?.void&&(data.can_create||data.can_manage)&&(!journal.approval||['returned','withdrawn'].includes(journal.approval.stage))" class="button" @click="confirmAction='cancel'">Cancel draft</button></div>
+  <div class="ac-form-actions"><a v-if="!journal.imprest?.void&&can((journal.kind==='general'?'journals':'cash_payments')+'.print')" class="button" :href="printable" target="_blank" rel="noopener">Print voucher</a><button v-if="canPost" class="button primary" :disabled="!paymentProofReady" @click="confirmAction='post'">Review posting</button><button v-if="journal.status==='draft'&&!journal.imprest?.void&&(data.can_create||data.can_manage)&&(!journal.approval||['returned','withdrawn'].includes(journal.approval.stage))" class="button" @click="confirmAction='cancel'">Cancel draft</button></div>
   <button v-if="journal.status==='posted'&&can((journal.kind==='general'?'journals':'cash_payments')+'.reverse')" class="button" :disabled="busy" @click="confirmAction='reverse';reason='';reverseDate=today()">Reverse posted voucher</button>
-  <AccountingApprovalPanel v-if="journal.status==='draft'&&!journal.imprest?.void" :company="company" type="journal" :document-id="journal.id" :version="journal.version" :csrf="csrf" @notice="emit('notice',$event)" @changed="refreshed"/>
+  <AccountingPaymentProofs v-if="journal.id" :company="company" :journal-id="journal.id" :version="journal.version" :csrf="csrf" :unsaved="false" @ready="paymentProofReady=$event" @notice="emit('notice',$event)"/><AccountingAdminRecordActions :company="company" type="journal" :record="journal" :csrf="csrf" :allow-edit="!journal.imprest?.void" @notice="emit('notice',$event)" @changed="adminRecordChanged"/>
+  <AccountingApprovalPanel :payment-proof-ready="paymentProofReady" v-if="journal.status==='draft'&&!journal.imprest?.void" :company="company" type="journal" :document-id="journal.id" :version="journal.version" :csrf="csrf" @notice="emit('notice',$event)" @changed="refreshed"/>
  </AccountingDocument>
  <AdminDialog v-if="confirmAction" :title="confirmAction==='post'?'Post saved imprest voucher':confirmAction==='reverse'?'Reverse posted voucher':'Cancel non-posted voucher'" :busy="busy" @close="confirmAction=''"><p v-if="formError" class="notice admin-error" role="alert">{{formError}}</p><template v-if="confirmAction==='reverse'"><p>The original voucher remains in history. An opposite posted entry will reverse it; allocated funds cannot be taken away if already spent or reserved.</p><label>Reversal date<input v-model="reverseDate" type="date" :min="journal.posting_date" :max="today()" required></label><label>Reason<textarea v-model="reason" minlength="5" maxlength="2000" required></textarea></label></template><p v-else>{{confirmAction==='post'?'Post '+journal.number+' to the ledger? Officer balances and company reports will update.':'Cancel '+journal.number+'? Its pending reservation will be released and the draft cannot be posted.'}}</p><div class="ac-form-actions"><button class="button" :disabled="busy" @click="confirmAction=''">Back</button><button class="button primary" :disabled="busy||(confirmAction==='reverse'&&reason.trim().length<5)" @click="action">{{busy?'Processing...':'Confirm'}}</button></div></AdminDialog>
 </section>

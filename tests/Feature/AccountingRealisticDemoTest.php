@@ -10,9 +10,11 @@ use Tests\TestCase;
 class AccountingRealisticDemoTest extends TestCase
 {
     use DatabaseTransactions;
+    use \Tests\Concerns\UploadsAccountingProofFixtures;
 
     public function test_realistic_demo_is_balanced_and_safe_to_rerun(): void
     {
+        \Illuminate\Support\Facades\Storage::fake('local');
         $seeder = new class extends AccountingRealisticDemoSeeder {
             protected string $companyName = 'Realistic COA automated test';
         };

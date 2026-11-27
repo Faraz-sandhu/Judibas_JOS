@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Services\UserProductAccess;
 class AccountingAllCompaniesTest extends TestCase {
  use DatabaseTransactions;
+    use \Tests\Concerns\UploadsAccountingProofFixtures;
  private array $companies=[];
  protected function setUp():void {
   parent::setUp();$this->withSession(['judibas_admin'=>true]);

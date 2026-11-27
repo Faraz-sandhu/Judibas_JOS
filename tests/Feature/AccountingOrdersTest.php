@@ -8,10 +8,36 @@ use App\Models\User;
 use App\Services\UserProductAccess;
 class AccountingOrdersTest extends TestCase {
  use DatabaseTransactions;
+    use \Tests\Concerns\UploadsAccountingProofFixtures;
  private array $companies=[];
  protected function setUp():void{parent::setUp();$this->withoutVite();$this->withSession(['judibas_admin'=>true]);foreach(['Order Seller','Order Buyer']as$name){$id=DB::table('communication_companies')->insertGetId(['name'=>$name]);$this->companies[]=$id;$this->postJson('/accounting/api/initialize',['company_id'=>$id])->assertOk();$this->postJson('/accounting/api/books',['company_id'=>$id,'version'=>0,'currency'=>'PKR','approval_required'=>false,'start_date'=>now()->subYear()->toDateString()])->assertOk();DB::table('accounting_accounts')->where('company_id',$id)->where('is_group',false)->where('root_type','Expense')->update(['account_type'=>'Cost of Sales']);}}
  private function payload():array{return ['seller_company_id'=>$this->companies[0],'buyer_company_id'=>$this->companies[1],'request_key'=>(string)Str::uuid(),'order_date'=>now()->toDateString(),'due_date'=>now()->addWeek()->toDateString(),'terms'=>'Service agreement','lines'=>[['description'=>'Website work','quantity'=>'1','quoted_rate'=>'200000','rate'=>'180000']]];}
  private function conversion():array{$a=DB::table('accounting_accounts')->where('company_id',$this->companies[0])->get();$b=DB::table('accounting_accounts')->where('company_id',$this->companies[1])->get();return ['company_id'=>$this->companies[1],'kind'=>'purchase','version'=>2,'posting_date'=>now()->toDateString(),'due_date'=>now()->addWeek()->toDateString(),'receivable_account_id'=>$a->firstWhere('account_type','Receivable')->id,'income_account_id'=>$a->first(fn($a)=>$a->root_type==='Income'&&!$a->is_group)->id,'payable_account_id'=>$b->firstWhere('account_type','Payable')->id,'cost_account_id'=>$b->firstWhere('account_type','Cost of Sales')->id];}
+ public function test_super_admin_replacement_saves_both_sides_and_archives_original_only_on_success():void{
+  $id=$this->postJson('/accounting/api/orders',$this->payload())->assertOk()->json('id');
+  $r=$this->postJson('/accounting/api/admin-records/order/'.$id,['company_id'=>$this->companies[1],'version'=>1,'action'=>'edit','reason'=>'Correct the agreed project amount.'])->assertOk();$body=$r->json('context.form');
+  $this->assertSame('draft',DB::table('accounting_intercompany_orders')->find($id)->status);
+  $invalid=$body;$invalid['lines'][0]['rate']='0';$this->postJson('/accounting/api/orders',$invalid)->assertUnprocessable();
+  $this->assertSame('draft',DB::table('accounting_intercompany_orders')->find($id)->status);
+  $body['lines'][0]['rate']='175000';$new=$this->postJson('/accounting/api/orders',$body)->assertOk()->json('id');
+  $this->assertNotEquals($id,$new);$this->assertSame('cancelled',DB::table('accounting_intercompany_orders')->find($id)->status);
+  foreach(['sale','purchase'] as $index=>$kind)$this->getJson('/accounting/api/orders?company_id='.$this->companies[$index].'&kind='.$kind)->assertOk()->assertJsonPath('total',1)->assertJsonPath('data.0.total','175000.00');
+ }
+ public function test_super_admin_order_delete_removes_linked_invoice_drafts_on_both_sides():void{
+  $id=$this->postJson('/accounting/api/orders',$this->payload())->assertOk()->json('id');
+  $this->postJson('/accounting/api/orders/'.$id.'/actions',['company_id'=>$this->companies[1],'kind'=>'purchase','version'=>1,'action'=>'confirm'])->assertOk();
+  $this->postJson('/accounting/api/orders/'.$id.'/invoices',$this->conversion())->assertOk();$order=DB::table('accounting_intercompany_orders')->find($id);
+  $this->postJson('/accounting/api/admin-records/order/'.$id,['company_id'=>$this->companies[0],'version'=>$order->version,'action'=>'delete','reason'=>'Remove the accidental linked order.'])->assertOk();
+  foreach($this->companies as $c){$this->getJson('/accounting/api/invoices?company_id='.$c)->assertOk()->assertJsonPath('total',0);$this->getJson('/accounting/api/orders?company_id='.$c.'&kind='.($c===$this->companies[0]?'sale':'purchase'))->assertOk()->assertJsonPath('total',0);}
+ }
+ public function test_super_admin_order_removal_reverses_both_posted_invoice_ledgers():void{
+  $id=$this->postJson('/accounting/api/orders',$this->payload())->assertOk()->json('id');
+  $this->postJson('/accounting/api/orders/'.$id.'/actions',['company_id'=>$this->companies[1],'kind'=>'purchase','version'=>1,'action'=>'confirm'])->assertOk();
+  $this->postJson('/accounting/api/orders/'.$id.'/invoices',$this->conversion())->assertOk();$order=DB::table('accounting_intercompany_orders')->find($id);
+  foreach([[$order->sales_invoice_id,$this->companies[0]],[$order->purchase_invoice_id,$this->companies[1]]] as [$invoice,$company])$this->postJson('/accounting/api/invoices/'.$invoice.'/post',['company_id'=>$company,'version'=>1])->assertOk();
+  $this->postJson('/accounting/api/admin-records/order/'.$id,['company_id'=>$this->companies[0],'version'=>$order->version,'action'=>'delete','reason'=>'Remove the incorrect linked transaction.'])->assertOk();
+  foreach($this->companies as $c){$this->assertSame(0,(int)DB::table('accounting_journal_lines as l')->join('accounting_journals as j','j.id','=','l.journal_id')->join('accounting_accounts as a','a.id','=','l.account_id')->where('j.company_id',$c)->whereIn('j.status',['posted','reversed'])->whereIn('a.account_type',['Receivable','Payable'])->selectRaw('SUM(l.debit_minor-l.credit_minor) as total')->value('total'));}
+ }
  public function test_purchase_order_rejects_operating_expense_account():void{
   $id=$this->postJson('/accounting/api/orders',$this->payload())->assertOk()->json('id');
   $this->postJson("/accounting/api/orders/$id/actions",['company_id'=>$this->companies[1],'kind'=>'purchase','version'=>1,'action'=>'confirm'])->assertOk();

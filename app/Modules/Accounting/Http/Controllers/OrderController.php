@@ -33,7 +33,7 @@ class OrderController
 
     private function query(int $company, string $kind)
     {
-        return DB::table('accounting_intercompany_orders')->where($kind === 'sale' ? 'seller_company_id' : 'buyer_company_id', $company);
+        return DB::table('accounting_intercompany_orders')->where($kind === 'sale' ? 'seller_company_id' : 'buyer_company_id', $company)->whereNotIn('id',\App\Modules\Accounting\Services\AdminRecordHistory::removed('order',$company));
     }
 
     private function data(Request $r, object $o, int $company, string $kind): array
@@ -107,7 +107,7 @@ class OrderController
 
     public function save(Request $r)
     {
-        $v = $r->validate(['seller_company_id' => 'required|integer|different:buyer_company_id', 'buyer_company_id' => 'required|integer', 'request_key' => 'required|uuid', 'order_date' => 'required|date_format:Y-m-d', 'due_date' => 'required|date_format:Y-m-d|after_or_equal:order_date', 'terms' => 'nullable|string|max:2000', 'lines' => 'required|array|min:1|max:100', 'lines.*.item_id'=>'nullable|integer','lines.*.description' => 'required|string|max:250', 'lines.*.quantity' => 'required', 'lines.*.quoted_rate' => 'required', 'lines.*.rate' => 'required']);
+        $v = $r->validate(['replacement_of'=>'nullable|integer','replacement_version'=>'required_with:replacement_of|integer|min:1','reason'=>'required_with:replacement_of|nullable|string|min:5|max:2000','seller_company_id' => 'required|integer|different:buyer_company_id', 'buyer_company_id' => 'required|integer', 'request_key' => 'required|uuid', 'order_date' => 'required|date_format:Y-m-d', 'due_date' => 'required|date_format:Y-m-d|after_or_equal:order_date', 'terms' => 'nullable|string|max:2000', 'lines' => 'required|array|min:1|max:100', 'lines.*.item_id'=>'nullable|integer','lines.*.description' => 'required|string|max:250', 'lines.*.quantity' => 'required', 'lines.*.quoted_rate' => 'required', 'lines.*.rate' => 'required']);
         $o = (object) ['seller_company_id' => (int) $v['seller_company_id'], 'buyer_company_id' => (int) $v['buyer_company_id']];
         $this->both($r, $o, 'create');
         $hash = hash('sha256', json_encode($v));
@@ -118,6 +118,13 @@ class OrderController
                 abort_unless(hash_equals($existing->payload_hash, $hash), 409, 'This request key was already used for different order details.');
 
                 return $existing->id;
+            }
+            $replaced=null;
+            if(!empty($v['replacement_of'])){
+                abort_unless(\App\Services\PlatformAccess::super($r),403,'Only Super Admin can replace orders.');
+                $replaced=DB::table('accounting_intercompany_orders')->where('id',$v['replacement_of'])->where('seller_company_id',$o->seller_company_id)->where('buyer_company_id',$o->buyer_company_id)->lockForUpdate()->first();abort_unless($replaced,404);
+                \App\Modules\Accounting\Services\AdminRecordHistory::assertLive('order',$o->seller_company_id,$replaced->id);
+                abort_unless($replaced->version===(int)$v['replacement_version'],409,'The original order changed. Reopen it.');
             }
             $seller = Ledger::book($o->seller_company_id);
             $buyer = Ledger::book($o->buyer_company_id);
@@ -143,6 +150,7 @@ class OrderController
             $customer = $this->party($r, $o->seller_company_id, $o->buyer_company_id, 'customer');
             $supplier = $this->party($r, $o->buyer_company_id, $o->seller_company_id, 'supplier');
             $id = DB::table('accounting_intercompany_orders')->insertGetId(['request_key' => $v['request_key'], 'seller_company_id' => $o->seller_company_id, 'buyer_company_id' => $o->buyer_company_id, 'customer_id' => $customer, 'supplier_id' => $supplier, 'order_date' => $v['order_date'], 'due_date' => $v['due_date'], 'currency' => $seller->currency, 'lines' => json_encode($lines), 'quoted_minor' => $quote, 'total_minor' => $net, 'terms' => $v['terms'] ?? null, 'payload_hash' => $hash, 'created_by' => $r->user()?->id, 'created_at' => now(), 'updated_at' => now()]);
+            if($replaced)app(AdminExtendedRecordController::class)->removeOrder($r,$replaced,$v['reason'],now()->toDateString());
             foreach ([$o->seller_company_id, $o->buyer_company_id] as $c) {
                 Access::audit($r, $c, 'Linked order created', 'IC-'.$id, ['order_id' => $id]);
             }

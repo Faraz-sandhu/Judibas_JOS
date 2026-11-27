@@ -14,7 +14,7 @@ class ItemController
     {
         $v = $r->validate(['company_id' => 'required|integer', 'usage' => 'nullable|in:sale,purchase', 'search' => 'nullable|string|max:150', 'status' => 'nullable|in:active,inactive', 'page' => 'nullable|integer|min:1']);
         Access::company($r, (int) $v['company_id'], 'items.view');
-        $q = DB::table('accounting_items')->where('company_id', $v['company_id']);
+        $q = DB::table('accounting_items')->where('company_id', $v['company_id'])->whereNotIn('id',\App\Modules\Accounting\Services\AdminRecordHistory::removed('item',(int)$v['company_id']));
         if (! empty($v['usage'])) {
             $q->where('active', true)->where($v['usage'] === 'sale' ? 'sellable' : 'purchasable', true);
         }$q->when($v['status'] ?? null, fn ($q, $s) => $q->where('active', $s === 'active'))->when($v['search'] ?? null, fn ($q, $s) => $q->where(fn ($q) => $q->where('name', 'ilike', '%'.$s.'%')->orWhere('code', 'ilike', '%'.$s.'%')));
@@ -35,6 +35,7 @@ class ItemController
             $old = empty($v['id']) ? null : DB::table('accounting_items')->where('company_id', $company)->where('id', $v['id'])->first();
             abort_if(! empty($v['id']) && ! $old, 404);
             abort_if($old && $old->version !== (int) $v['version'], 409, 'Item changed. Reopen before saving.');
+            if($old)\App\Modules\Accounting\Services\AdminRecordHistory::assertLive('item',$company,$old->id);
             $code = strtoupper(trim($v['code']));
             abort_if($code === '' || trim($v['name']) === '' || trim($v['unit']) === '', 422, 'Code, name and unit cannot be empty.');
             abort_if(DB::table('accounting_items')->where('company_id', $company)->where('code', $code)->when($old, fn ($q) => $q->where('id', '<>', $old->id))->exists(), 422, 'This item code already exists in this company.');

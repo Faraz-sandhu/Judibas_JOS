@@ -20,6 +20,13 @@ Route::get('/accounting/journals/{id}/print', [\App\Modules\Accounting\Http\Cont
 Route::get('/accounting/vouchers/{id}/print', [\App\Modules\Accounting\Http\Controllers\JournalController::class, 'printVoucher'])->whereNumber('id');
 Route::get('/accounting/invoices/{id}/print', [\App\Modules\Accounting\Http\Controllers\TradeController::class, 'printInvoice'])->whereNumber('id');
 Route::prefix('accounting/api')->middleware(\App\Modules\Accounting\Http\Middleware\RestrictImprestOfficer::class)->group(function () {
+    Route::get('journals/{id}/payment-proofs',[\App\Modules\Accounting\Http\Controllers\PaymentProofController::class,'index'])->whereNumber('id');
+    Route::post('journals/{id}/payment-proofs',[\App\Modules\Accounting\Http\Controllers\PaymentProofController::class,'store'])->whereNumber('id');
+    Route::get('payment-proofs/{id}',[\App\Modules\Accounting\Http\Controllers\PaymentProofController::class,'show'])->whereNumber('id');
+    Route::post('payment-proofs/{id}/remove',[\App\Modules\Accounting\Http\Controllers\PaymentProofController::class,'remove'])->whereNumber('id');
+    Route::post('admin-accounts/{id}',[\App\Modules\Accounting\Http\Controllers\AdminExtendedRecordController::class,'saveAccount'])->whereNumber('id');
+    Route::post('admin-cheques/{id}',[\App\Modules\Accounting\Http\Controllers\AdminExtendedRecordController::class,'saveCheque'])->whereNumber('id');
+    Route::post('admin-records/{type}/{id}', [\App\Modules\Accounting\Http\Controllers\AdminRecordController::class,'action'])->whereNumber('id');
     Route::get('realtime/config', [\App\Modules\Accounting\Http\Controllers\WorkspaceRealtimeController::class, 'config']);
     Route::post('realtime/auth', [\App\Modules\Accounting\Http\Controllers\WorkspaceRealtimeController::class, 'auth']);
     Route::get('report-parties',[\App\Modules\Accounting\Http\Controllers\FinancialReportsController::class,'parties']);
@@ -29,6 +36,10 @@ Route::prefix('accounting/api')->middleware(\App\Modules\Accounting\Http\Middlew
     Route::get('cheques', [\App\Modules\Accounting\Http\Controllers\ChequeController::class,'index']);
     Route::post('cheques', [\App\Modules\Accounting\Http\Controllers\ChequeController::class,'save']);
     Route::post('cheques/{id}/actions', [\App\Modules\Accounting\Http\Controllers\ChequeController::class,'action'])->whereNumber('id');
+    Route::get('cash-custody', [\App\Modules\Accounting\Http\Controllers\CashCustodyController::class,'index']);
+    Route::post('cash-custody/custodians', [\App\Modules\Accounting\Http\Controllers\CashCustodyController::class,'assign']);
+    Route::post('cash-custody', [\App\Modules\Accounting\Http\Controllers\CashCustodyController::class,'save']);
+    Route::post('cash-custody/{id}/receive', [\App\Modules\Accounting\Http\Controllers\CashCustodyController::class,'receive'])->whereNumber('id');
     Route::get('imprest', [\App\Modules\Accounting\Http\Controllers\ImprestController::class,'index']);
     Route::get('imprest/{id}', [\App\Modules\Accounting\Http\Controllers\ImprestController::class,'show'])->whereNumber('id');
     Route::post('imprest/funds', [\App\Modules\Accounting\Http\Controllers\ImprestController::class,'createFund']);

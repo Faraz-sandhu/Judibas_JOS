@@ -16,6 +16,7 @@ use Tests\TestCase;
 class CatalogueAllScopeTest extends TestCase
 {
     use DatabaseTransactions;
+    use \Tests\Concerns\UploadsAccountingProofFixtures;
 
     private array $ids = [];
 

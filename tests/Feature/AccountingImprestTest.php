@@ -16,6 +16,7 @@ use Tests\TestCase;
 class AccountingImprestTest extends TestCase
 {
     use DatabaseTransactions;
+    use \Tests\Concerns\UploadsAccountingProofFixtures;
 
     private int $company;
 
@@ -74,6 +75,29 @@ class AccountingImprestTest extends TestCase
         $cash=collect($this->getJson($url)->assertOk()->json('accounts'))->firstWhere('id',$this->accounts['01-01-01']);
         $this->assertSame('50000.00',$cash['disbursement_amount']);
         $this->assertSame($before,ImprestFunds::balance($this->fund));
+    }
+
+    public function test_assigned_officer_can_attach_proof_to_own_spending_voucher(): void
+    {
+        $this->fund();$this->officer();
+        $j=$this->postJson('/accounting/api/imprest/spend',$this->body('spending','100.00'))->assertOk()->json('journal');
+        $this->post('/accounting/api/journals/'.$j['id'].'/payment-proofs',['company_id'=>$this->company,'version'=>$j['version'],'payment_proof'=>UploadedFile::fake()->create('officer-receipt.pdf',10,'application/pdf')],['Accept'=>'application/json'])->assertOk();
+        $path=DB::table('accounting_payment_proofs')->where('journal_id',$j['id'])->value('path');$this->beforeApplicationDestroyed(fn()=>Storage::disk('local')->delete($path));
+        $this->getJson('/accounting/api/journals/'.$j['id'].'/payment-proofs?company_id='.$this->company)->assertOk()->assertJsonPath('has_current',true);
+    }
+
+    public function test_super_admin_can_correct_funding_with_custody_balances_preserved(): void
+    {
+        $j=$this->fund();
+        $this->admin();
+        $r=$this->postJson('/accounting/api/admin-records/journal/'.$j['id'],['company_id'=>$this->company,'version'=>$j['version'],'action'=>'edit','reason'=>'Correct the officer allocation.','posting_date'=>now()->toDateString()])->assertOk();
+        $this->assertSame('funding',$r->json('context.type'));
+        $this->assertSame('50000.00',$r->json('context.form.amount'));
+        $this->assertSame(0,ImprestFunds::balance($this->fund));
+        $this->assertDatabaseHas('accounting_imprest_movements',['journal_id'=>$j['id'],'void'=>true]);
+        $replacement=$this->postJson('/accounting/api/imprest/allocate',['company_id'=>$this->company]+$r->json('context.form'))->assertOk()->json('journal');
+        $this->postJson('/accounting/api/imprest/'.$replacement['id'].'/post',['company_id'=>$this->company,'version'=>$replacement['version']])->assertOk();
+        $this->assertSame(5000000,ImprestFunds::balance($this->fund));
     }
 
     private function member(string $role): User

@@ -22,6 +22,7 @@ use Illuminate\Support\Str;
 
 class AccountingImprestDemoSeeder extends Seeder
 {
+    use CreatesAccountingDemoProofs;
     public const JUNIOR = 'imprest.junior@example.test';
 
     public const MANAGER = 'imprest.manager@example.test';
@@ -62,6 +63,7 @@ class AccountingImprestDemoSeeder extends Seeder
             return;
         }
         abort_unless($journal['status'] === 'draft', 409, 'An existing sample was reversed; it was not recreated.');
+        $this->attachDemoPaymentProof($this->request(['company_id'=>$company]),$journal);
         if (ApprovalFlow::enabled($company, 'journal', $journal['id'])) {
             // Explicitly fictional local fixture, never a claim of a real CEO signature.
             $path = tempnam(storage_path('app'), 'imprest-test-');
@@ -75,16 +77,16 @@ class AccountingImprestDemoSeeder extends Seeder
                 $request->files->set('signed_copy', new UploadedFile($path, 'TEST-ONLY-SIMULATED-APPROVAL.pdf', 'application/pdf', UPLOAD_ERR_OK, true));
                 app(SignedCopyController::class)->store($request, 0);
                 $approval = ApprovalFlow::approval($company, 'journal', $journal['id']);
-                app(ApprovalController::class)->action($this->request(['company_id' => $company, 'version' => $approval->version, 'action' => 'post', 'verified_signed_copy' => true, 'note' => 'TEST ONLY: finance manager confirms this simulated sample approval; no real payment.'], $manager), $approval->id);
+                foreach(['approve','approve','post'] as $action){$approval=ApprovalFlow::approval($company,'journal',$journal['id']);app(ApprovalController::class)->action($this->request(['company_id'=>$company,'version'=>$approval->version,'action'=>$action,'verified_signed_copy'=>true,'note'=>'TEST ONLY: Super Admin simulates the approval stages; no real payment.']),$approval->id);}
             } finally {
                 if (is_file($path)) {
                     unlink($path);
                 }
             }
         } elseif (! empty($journal['imprest'])) {
-            app(ImprestController::class)->post($this->request(['company_id' => $company, 'version' => $journal['version']], $manager), $journal['id']);
+            app(ImprestController::class)->post($this->request(['company_id' => $company, 'version' => $journal['version']]), $journal['id']);
         } else {
-            app(JournalController::class)->post($this->request(['company_id' => $company, 'version' => $journal['version']], $manager), $journal['id']);
+            app(JournalController::class)->post($this->request(['company_id' => $company, 'version' => $journal['version']]), $journal['id']);
         }
     }
 

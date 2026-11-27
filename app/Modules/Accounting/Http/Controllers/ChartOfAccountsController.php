@@ -84,11 +84,13 @@ class ChartOfAccountsController
             $q = DB::table('accounting_accounts')->where('company_id', $company);
             $old = isset($v['id']) ? (clone $q)->where('id', $v['id'])->first() : null;
             abort_if(isset($v['id']) && ! $old, 404);
+            if($old)\App\Modules\Accounting\Services\AdminRecordHistory::assertLive('account',$company,$old->id);
             abort_if($old && $old->version !== (int) ($v['version'] ?? 0), 409, 'This account was changed by another person. Close this form and reopen the account before saving.');
             abort_if($old && \App\Modules\Accounting\Services\ImprestFunds::protectedAccount($old->id),422,'Officer fund ledger accounts are managed through Imprest / Petty Cash.');
             abort_if($old && \App\Modules\Accounting\Services\PartyAccounts::protected($old->id),422,'Manage this account through its customer or supplier.');
             abort_if($old?->is_system, 422, 'Root groups are protected. Add or edit accounts beneath them.');
             $parent = (clone $q)->where('id', $v['parent_id'])->first();
+            if($parent)\App\Modules\Accounting\Services\AdminRecordHistory::assertLive('account',$company,$parent->id);
             abort_unless($parent && $parent->is_group, 422, 'Choose a group in this company as the parent.');
             abort_unless($parent->root_type === $v['root_type'], 422, 'The parent must have the same root type.');
             abort_if($v['active'] && ! $parent->active, 422, 'An active account needs an active parent group.');

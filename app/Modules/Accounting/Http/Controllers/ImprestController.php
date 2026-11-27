@@ -31,7 +31,7 @@ class ImprestController
         }
         $movements = DB::table('accounting_imprest_movements as m')->join('accounting_journals as j', 'j.id', '=', 'm.journal_id')
             ->join('accounting_imprest_funds as f', 'f.id', '=', 'm.fund_id')->join('users as u', 'u.id', '=', 'f.user_id')
-            ->whereIn('m.fund_id', $funds->pluck('id'))->orderByDesc('j.id')
+            ->whereIn('m.fund_id', $funds->pluck('id'))->whereNotIn('j.id',\App\Modules\Accounting\Services\AdminRecordHistory::removed('journal',$company))->orderByDesc('j.id')
             ->select(['m.id', 'm.type', 'm.void', 'j.id as journal_id', 'j.number', 'j.posting_date', 'j.status', 'j.version', 'j.remarks', 'j.voucher_person', 'f.name as fund_name', 'u.name as officer_name'])->paginate(15);
         $movements->setCollection($movements->getCollection()->map(function ($m) {
             $m->amount = Ledger::money((int) DB::table('accounting_journal_lines')->where('journal_id', $m->journal_id)->sum('debit_minor'));

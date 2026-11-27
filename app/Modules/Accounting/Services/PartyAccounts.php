@@ -12,6 +12,7 @@ class PartyAccounts
         $party = DB::table('accounting_parties')->where('company_id', $company)->where('id', $id)->lockForUpdate()->first();
         abort_unless($party, 422, 'Contact not found in this company.');
         if ($party->account_id) {
+            AdminRecordHistory::assertLive('account',$company,$party->account_id);
             DB::table('accounting_accounts')->where('company_id', $company)->where('id', $party->account_id)->update(['name' => $party->name, 'active' => $party->active, 'updated_at' => now()]);
 
             return $party->account_id;

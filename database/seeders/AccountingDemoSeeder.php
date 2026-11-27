@@ -10,6 +10,7 @@ use Illuminate\Support\Str;
 
 class AccountingDemoSeeder extends Seeder
 {
+    use CreatesAccountingDemoProofs;
     protected string $companyName = 'Judibas Accounting Demo (TEST ONLY)';
 
     protected function request(array $input): Request
@@ -50,7 +51,7 @@ class AccountingDemoSeeder extends Seeder
             $journals = app(JournalController::class);
             $makeJournal = function (string $description, string $date, string $kind, array $lines, bool $post = true) use ($journals, $base) {
                 $j = $journals->save($this->request($base + ['request_key' => (string) Str::uuid(), 'posting_date' => $date, 'kind' => $kind, 'remarks' => $description.' (fictional demo)', 'lines' => $lines]))['journal'];
-                if ($post) $journals->post($this->request($base + ['version' => $j['version']]), $j['id']);
+                if ($post){$this->attachDemoPaymentProof($this->request($base),$j);$journals->post($this->request($base + ['version' => $j['version']]), $j['id']);}
 
                 return $j;
             };

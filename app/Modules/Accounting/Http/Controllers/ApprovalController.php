@@ -16,7 +16,7 @@ class ApprovalController
         $events=DB::table('accounting_approval_events')->where('approval_id',$approval->id)->orderBy('id')->get();
         $permission=Flow::PERMISSIONS[$approval->stage]??null;
         $paper=$approval->workflow_mode==='paper';$copy=$paper?Flow::signedCopy($approval):null;
-        $copies=DB::table('accounting_signed_copies')->where('company_id',$approval->company_id)->where('approval_id',$approval->id)->orderByDesc('id')->get(['id','original_name','mime','size','uploaded_name','created_at','document_version','submission_version'])->map(fn($c)=>(array)$c+['url'=>'/accounting/api/signed-copies/'.$c->id.'?company_id='.$approval->company_id,'current'=>$copy&&$c->id===$copy->id]);
+        $copies=DB::table('accounting_signed_copies')->whereNull('removed_at')->where('company_id',$approval->company_id)->where('approval_id',$approval->id)->orderByDesc('id')->get(['id','original_name','mime','size','uploaded_name','created_at','document_version','submission_version'])->map(fn($c)=>(array)$c+['url'=>'/accounting/api/signed-copies/'.$c->id.'?company_id='.$approval->company_id,'current'=>$copy&&$c->id===$copy->id]);
         $samePreparer=$r->user()?->id&&$approval->prepared_by===$r->user()->id;
         $sameCeo=$r->user()?->id&&$approval->ceo_by===$r->user()->id;
         $sameUploader=$copy&&$r->user()?->id&&$copy->uploaded_by===$r->user()->id;
@@ -29,7 +29,7 @@ class ApprovalController
                 'manager_review'=>PlatformAccess::super($r),default=>false};
         }elseif($approval->stage==='manager_review')$canAct=$canAct&&PlatformAccess::super($r);
         return (array)$approval+['stage_label'=>Flow::STAGES[$approval->stage]??$approval->stage,'document'=>$document['detail'],'events'=>$events,
-            'signed_copies'=>$copies,'can_upload_signed'=>$paper&&in_array($approval->stage,['paper_ceo','head_review'],true)&&Permissions::can($r,'workflow.upload_signed'),'can_approve'=>(bool)$canAct,'can_return'=>(bool)($canAct||($approval->stage==='paper_ceo'&&$permission&&Permissions::can($r,$permission))),
+            'signed_copies'=>$copies,'can_upload_signed'=>$paper&&(PlatformAccess::super($r)||in_array($approval->stage,['paper_ceo','head_review'],true))&&Permissions::can($r,'workflow.upload_signed'),'can_approve'=>(bool)$canAct,'can_return'=>(bool)($canAct||($approval->stage==='paper_ceo'&&$permission&&Permissions::can($r,$permission))),
             'can_withdraw'=>in_array($approval->stage,array_keys(Flow::PERMISSIONS))&&(PlatformAccess::administrator($r)||($samePreparer&&Permissions::can($r,'workflow.submit'))),
             'separation_notice'=>$permission&&!$separation?'The preparer or person who uploaded the signed copy cannot perform final verification. A different Finance Head must review it.':null];
     }
@@ -103,6 +103,7 @@ class ApprovalController
                     }else{
                         abort_unless($v['action']==='approve',422,'This stage requires approval before posting.');
                         $next=['finance_review'=>'ceo_review','ceo_review'=>'finance_verify','finance_verify'=>'manager_review','head_review'=>'officer_confirm','officer_confirm'=>'manager_review'][$a->stage];
+                        if($a->stage==='officer_confirm'&&$a->document_type==='journal')\App\Modules\Accounting\Services\PaymentProofs::requireCurrent($row);
                         if($a->stage==='head_review'){
                             abort_unless($r->boolean('verified_signed_copy'),422,'Confirm the CEO signature and voucher amounts against the signed copy.');
                             $copy=Flow::signedCopy($a);abort_unless($copy&&\Illuminate\Support\Facades\Storage::disk('local')->exists($copy->path),422,'The current signed voucher file is unavailable.');
