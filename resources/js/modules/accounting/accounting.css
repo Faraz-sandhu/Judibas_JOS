@@ -114,3 +114,7 @@
 .ac-tree-panel .ac-chart-columns{grid-template-columns:minmax(280px,1fr) 140px 160px 70px;min-width:940px}
 .ac-tree-panel .ac-tree{min-width:max(940px,var(--tree-width,780px))}
 .ac-tree-row>.ac-chart-amount{width:140px;flex:none}.ac-tree-row>.ac-disbursement-amount{width:160px;color:var(--accent,#7864ff)}
+
+/* Credit balances use parentheses in both the tree and account detail. */
+.ac-workspace .ac-credit-balance{color:#c73838}
+[data-theme="dark"] .ac-workspace .ac-credit-balance{color:#ff8585}
